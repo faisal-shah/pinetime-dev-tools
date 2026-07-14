@@ -15,7 +15,7 @@ const PORT = Number(process.env.BRIDGE_PORT ?? 18632);
 const HOST = process.env.BRIDGE_HOST ?? '127.0.0.1';
 
 // charIds, see InfiniSim sim/gatt_bridge.h
-const CHAR = { scheduleSync: 0, scheduleDigest: 1, currentTime: 2, newAlert: 3, battery: 4, eventRead: 5 };
+const CHAR = { scheduleSync: 0, scheduleDigest: 1, currentTime: 2, newAlert: 3, battery: 4, eventRead: 5, prayerSettings: 6 };
 const OP = { write: 0, read: 1 };
 
 let failures = 0;
@@ -358,6 +358,47 @@ const mkSlotEvent = (i) => ({
   d = decodeDigest((await bridge2.read(CHAR.scheduleDigest)).payload);
   check(d.count === 1 && d.version === AFTER_VERSION, 'post-disconnect sync is live', JSON.stringify(d));
   bridge2.close();
+}
+
+
+// 13. Prayer settings: write the doc/PrayerService.md golden vector, confirm
+//     the asynchronous commit via read-back; invalid blobs are rejected and
+//     leave the stored settings untouched.
+{
+  const golden = Buffer.from('010101015c10c5ddec', 'hex'); // Chicago, ISNA, Hanafi, alerts on, UTC-5
+  const bridge3 = await Bridge.connect();
+  let r = await bridge3.write(CHAR.prayerSettings, golden);
+  check(r.status === 0, 'prayer settings write accepted');
+  let echoed = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await sleep(200);
+    r = await bridge3.read(CHAR.prayerSettings);
+    if (r.status === 0 && r.payload.equals(golden)) {
+      echoed = r.payload;
+      break;
+    }
+  }
+  check(echoed !== null, 'prayer settings read back byte-exact', r.payload?.toString('hex'));
+
+  r = await bridge3.write(CHAR.prayerSettings, golden.subarray(0, 8));
+  check(r.status !== 0, 'short prayer blob rejected');
+  const badVersion = Buffer.from(golden);
+  badVersion[0] = 2;
+  r = await bridge3.write(CHAR.prayerSettings, badVersion);
+  check(r.status !== 0, 'wrong prayer version rejected');
+  const badLat = Buffer.from(golden);
+  badLat.writeInt16LE(9001, 4);
+  r = await bridge3.write(CHAR.prayerSettings, badLat);
+  check(r.status !== 0, 'out-of-range latitude rejected');
+  const badFlags = Buffer.from(golden);
+  badFlags[3] = 0x03; // reserved bit set
+  r = await bridge3.write(CHAR.prayerSettings, badFlags);
+  check(r.status !== 0, 'reserved flag bits rejected');
+
+  await sleep(300);
+  r = await bridge3.read(CHAR.prayerSettings);
+  check(r.status === 0 && r.payload.equals(golden), 'rejected writes left settings untouched');
+  bridge3.close();
 }
 
 console.log(`\n${checks} checks, ${failures} failures`);
