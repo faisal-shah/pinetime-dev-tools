@@ -30,13 +30,21 @@ grep InfiniTime_DIR ../InfiniSim/build/CMakeCache.txt
 ./simctl.py shot name      # capture the watch screen -> shots/name.png
 ./simctl.py awake          # wake the screen ONLY if it's off (state-aware, reads sim.log)
 ./simctl.py stop
+./simctl.py kill           # SIGKILL, no graceful stop: power-loss simulation
 ```
 
 The sim always starts with the **TCP GATT bridge** on port 18632 (`--bridge-port` to
 change): the watch's BLE characteristics served over TCP, so companion-app code and
 tests can talk to the simulated watch with real protocol bytes. `node bridge-test.mjs`
-is the standing protocol regression (schedule sync, digest, violation handling, CTS
+is the standing protocol regression (schedule sync incl. 64-event, out-of-order and
+disconnect-mid-sync cases, digest, event read-back, violation handling, CTS
 time-travel, notifications, battery) — run it after firmware protocol changes.
+
+Two slower scenario regressions for the flash-resident schedule storage:
+`./powerloss-test.sh` kills the sim mid-sync and proves (littlefs-do post-mortem)
+that the active schedule survives and the partial staging file is cleaned up at
+boot; `./reminder-fire-test.sh` (~2 min) proves a reminder fires from sleep with
+combined same-second titles and that dismiss works. Both leave the sim running.
 
 `companion-cli.mjs` is a second companion (and the computer-syncing story): it speaks the
 same wire protocol through the bridge, so you can drive a two-device scenario locally.

@@ -222,6 +222,28 @@ def cmd_stop(args, quiet=False):
         print("stopped")
 
 
+def cmd_kill(args):
+    """SIGKILL the simulator (power-loss simulation): no graceful stop, no
+    flush - whatever reached spiNorFlash.raw is what a real power cut would
+    leave behind."""
+    if not STATE.exists():
+        print("not running")
+        return
+    st = json.loads(STATE.read_text())
+    pid = st.get("sim_pid")
+    if pid and alive(pid):
+        os.kill(pid, signal.SIGKILL)
+        print(f"killed sim pid {pid} (power loss); flash image left as-is")
+    else:
+        print("sim already dead")
+    if st.get("xvfb_pid") and alive(st["xvfb_pid"]):
+        try:
+            os.kill(st["xvfb_pid"], signal.SIGKILL)
+        except OSError:
+            pass
+    STATE.unlink()
+
+
 def cmd_restart(args):
     cmd_stop(args, quiet=True)
     cmd_start(args)
@@ -398,6 +420,7 @@ def main():
     s.set_defaults(func=cmd_start)
 
     sub.add_parser("stop").set_defaults(func=cmd_stop)
+    sub.add_parser("kill", help="SIGKILL the sim (power-loss test; flash left as-is)").set_defaults(func=cmd_kill)
     s = sub.add_parser("restart", help="restart (use after rebuilding)")
     s.add_argument("--display")
     s.add_argument("--zoom", type=int, default=1)

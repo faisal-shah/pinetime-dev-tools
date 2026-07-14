@@ -263,19 +263,102 @@ const VERSION = 424242;
   check(afterB.filter((p) => p.readUInt16LE(0) !== 0x7777).length === 3, "A's original events survived B's sync");
 }
 
-// 8. CTS time set: jump the watch clock to a distinctive time (time travel!)
+// 8. Full-capacity sync, staged OUT OF ORDER: 64 records written index 63..0
+//    (littlefs zero-fills the seek-past-EOF gaps; the receive bitmask ensures
+//    completeness before commit). Spot-read records across the file after.
+const mkSlotEvent = (i) => ({
+  id: 1000 + i, ruleKind: 1, hour: i % 24, minute: (i * 5) % 60,
+  anchor: new Date(2026, 6, 14), param: 1 + (i % 9), enabled: true, title: `Slot ${i}`,
+  lastModified: 1789000000 + i,
+});
+{
+  const FULL_VERSION = 646464;
+  let r = await bridge.write(CHAR.scheduleSync, beginSync(64, FULL_VERSION));
+  check(r.status === 0, 'BeginSync(64) accepted');
+  let allOk = true;
+  for (let i = 63; i >= 0; i--) {
+    r = await bridge.write(CHAR.scheduleSync, eventMsg(i, encodeEventRecord(mkSlotEvent(i))));
+    if (r.status !== 0) {
+      allOk = false;
+      break;
+    }
+  }
+  check(allOk, 'all 64 records staged in reverse order');
+  r = await bridge.write(CHAR.scheduleSync, commitSync(64));
+  check(r.status === 0, 'CommitSync(64) accepted');
+  await sleep(300);
+  r = await bridge.read(CHAR.scheduleDigest);
+  const d = decodeDigest(r.payload);
+  check(d.count === 64 && d.version === FULL_VERSION, 'digest shows 64 events', JSON.stringify(d));
+  for (const idx of [0, 40, 63]) {
+    await bridge.write(CHAR.eventRead, Buffer.from([idx]));
+    r = await bridge.read(CHAR.eventRead);
+    const want = encodeEventRecord(mkSlotEvent(idx));
+    check(r.status === 0 && r.payload.equals(want), `record[${idx}] round-trips byte-exact`);
+  }
+}
+
+// 9. Stale read index: a select survives only while the schedule stays at
+//    least that big; the firmware re-validates at read time.
+{
+  let r = await bridge.write(CHAR.eventRead, Buffer.from([63]));
+  check(r.status === 0, 'select record 63 while 64 events live');
+  const SHRUNK_VERSION = 655001;
+  await bridge.write(CHAR.scheduleSync, beginSync(2, SHRUNK_VERSION));
+  for (let i = 0; i < 2; i++) {
+    await bridge.write(CHAR.scheduleSync, eventMsg(i, encodeEventRecord({
+      id: 50 + i, ruleKind: 1, hour: 8, minute: 0, anchor: new Date(), param: 1, enabled: true, title: `Keep ${i}`,
+    })));
+  }
+  r = await bridge.write(CHAR.scheduleSync, commitSync(2));
+  check(r.status === 0, 'shrinking sync accepted');
+  await sleep(300);
+  r = await bridge.read(CHAR.eventRead);
+  check(r.status !== 0, 'stale read index rejected after shrink');
+  await bridge.write(CHAR.eventRead, Buffer.from([1]));
+  r = await bridge.read(CHAR.eventRead);
+  check(r.status === 0 && r.payload.readUInt16LE(0) === 51, 're-selected valid index reads fine');
+}
+
+// 10. CTS time set: jump the watch clock to a distinctive time (time travel!)
 {
   const target = new Date(2026, 11, 25, 10, 8, 0); // Dec 25 2026 10:08
   const r = await bridge.write(CHAR.currentTime, encodeCts(target));
   check(r.status === 0, 'CTS time write accepted');
 }
 
-// 7. New Alert -> notification appears on the watch
+// 11. New Alert -> notification appears on the watch
 {
   const r = await bridge.write(CHAR.newAlert, encodeNewAlert('PineTimeCompanion', 'Bridge says salaam!'));
   check(r.status === 0, 'New Alert accepted');
 }
 
-bridge.close();
+// 12. Disconnect mid-sync: dropping the link discards the staged transaction
+//     (the bridge treats a superseding connection as a BLE disconnect). The
+//     schedule is untouched and a fresh sync on the new link succeeds.
+{
+  const before = await bridge.read(CHAR.scheduleDigest).then((r) => decodeDigest(r.payload));
+  await bridge.write(CHAR.scheduleSync, beginSync(3, 987654));
+  await bridge.write(CHAR.scheduleSync, eventMsg(0, encodeEventRecord(mkSlotEvent(0))));
+  bridge.socket.destroy(); // vanish mid-transaction, no Abort
+
+  const bridge2 = await Bridge.connect();
+  await sleep(300); // let the bridge notice and run OnDisconnect
+  let r = await bridge2.read(CHAR.scheduleDigest);
+  let d = decodeDigest(r.payload);
+  check(d.count === before.count && d.version === before.version,
+        'schedule untouched after disconnect mid-sync', JSON.stringify(d));
+
+  const AFTER_VERSION = 987655;
+  await bridge2.write(CHAR.scheduleSync, beginSync(1, AFTER_VERSION));
+  await bridge2.write(CHAR.scheduleSync, eventMsg(0, encodeEventRecord(mkSlotEvent(7))));
+  r = await bridge2.write(CHAR.scheduleSync, commitSync(1));
+  check(r.status === 0, 'fresh sync succeeds after abandoned transaction');
+  await sleep(300);
+  d = decodeDigest((await bridge2.read(CHAR.scheduleDigest)).payload);
+  check(d.count === 1 && d.version === AFTER_VERSION, 'post-disconnect sync is live', JSON.stringify(d));
+  bridge2.close();
+}
+
 console.log(`\n${checks} checks, ${failures} failures`);
 process.exit(failures === 0 ? 1 * (failures > 0) : 0);
