@@ -1,0 +1,94 @@
+# PineTime dev environment
+
+Closed-loop setup for developing InfiniTime apps against the simulator:
+edit source → rebuild → drive the UI → look at the screen.
+
+## Layout
+
+| Path | What it is |
+|---|---|
+| `../InfiniTime` | **Your fork** — firmware source. This is where apps get written. |
+| `../InfiniSim` | Your fork of the simulator. Builds the firmware source into a desktop binary. |
+| `simctl.py` | Runs the sim headlessly and sends it input / takes screenshots. |
+| `shots/` | Captured screenshots (240×240 PNGs of the watch screen). |
+| `run/` | Simulator working dir: emulated SPI flash, `sim.log`. |
+
+InfiniSim vendors its own copy of InfiniTime at `InfiniSim/InfiniTime/` (a submodule
+pointing at upstream). We ignore it: the build is configured with
+`-DInfiniTime_DIR=/home/faisal/repos/faisal-shah/InfiniTime` so it compiles **your fork**.
+If the sim ever seems to ignore your changes, check that setting first:
+
+```sh
+grep InfiniTime_DIR ../InfiniSim/build/CMakeCache.txt
+```
+
+## Workflow
+
+```sh
+./simctl.py start          # boot the sim on a hidden virtual display (Xvfb)
+./simctl.py rebuild        # compile the fork + restart the sim — the inner dev loop
+./simctl.py shot name      # capture the watch screen -> shots/name.png
+./simctl.py awake          # wake the screen ONLY if it's off (state-aware, reads sim.log)
+./simctl.py stop
+```
+
+The sim always starts with the **TCP GATT bridge** on port 18632 (`--bridge-port` to
+change): the watch's BLE characteristics served over TCP, so companion-app code and
+tests can talk to the simulated watch with real protocol bytes. `node bridge-test.mjs`
+is the standing protocol regression (schedule sync, digest, violation handling, CTS
+time-travel, notifications, battery) — run it after firmware protocol changes.
+
+`build-asan/` in InfiniSim is an AddressSanitizer build (`LD_PRELOAD` libasan to run);
+a wake/sleep stress loop under it is the regression test for the LVGL thread race fixed
+in `sim/displayapp/LvglGuard.h`.
+
+Driving the watch:
+
+```sh
+./simctl.py tap 120 120         # touch, in watch coords (0-239)
+./simctl.py drag 120 200 120 40 # press-move-release swipe
+./simctl.py swipe up            # gesture shortcut (up/down/left/right)
+./simctl.py button              # hardware side button (back / wake)
+./simctl.py button --hold 2000  # long press
+./simctl.py key notify          # simulate an event, see aliases below
+```
+
+Event aliases: `ring`, `unring`, `buzz`, `notify`, `clear-notify`, `ble-connect`,
+`ble-disconnect`, `battery-up`, `battery-down`, `charging`, `not-charging`,
+`brightness-up`, `brightness-down`, `steps-up`, `steps-down`, `heartrate`,
+`heartrate-stop`, `weather`, `clear-weather`. Any raw InfiniSim hotkey also works
+(`./simctl.py key i`).
+
+The screen sleeps on its own; use `./simctl.py awake` (only presses the button when
+the screen is actually off — a blind `button` on a live watchface puts it to sleep).
+When driving multi-step UI flows, chain the steps in one shell command: per-command
+latency is longer than the watch's display timeout.
+
+## Why input is "held"
+
+InfiniSim polls `SDL_GetKeyboardState` / `SDL_GetMouseState` once per LVGL refresh
+(~30 ms) rather than consuming SDL events. An instant xdotool click or keystroke
+lands between two polls and is silently dropped. `simctl.py` therefore holds every
+input ~150 ms. If you drive the sim by other means, do the same.
+
+## First-time setup (already done)
+
+```sh
+sudo apt install -y xvfb xdotool xauth        # only step needing root
+cd ../InfiniSim && npm install lv_font_conv@1.5.2
+cmake -S . -B build \
+  -DInfiniTime_DIR=/home/faisal/repos/faisal-shah/InfiniTime \
+  -DWITH_PNG=ON -DBUILD_RESOURCES=ON -DMONITOR_ZOOM=1 -DCMAKE_BUILD_TYPE=Debug
+cmake --build build -j$(nproc)
+```
+
+`MONITOR_ZOOM=1` keeps window pixels 1:1 with watch pixels, so screenshot
+coordinates and tap coordinates are the same numbers. `simctl.py` handles other
+zoom levels, but 1 keeps things simple.
+
+## Writing an app
+
+An InfiniTime app lives in `../InfiniTime/src/displayapp/screens/`, is registered in
+`src/displayapp/apps/Apps.h.in` + `UserApps.h`, and gets instantiated in
+`DisplayApp.cpp`. To control which apps are compiled in, configure the sim with
+`-DENABLE_USERAPPS="Apps::Timer,Apps::Alarm,..."`.
