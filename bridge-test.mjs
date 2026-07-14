@@ -15,7 +15,7 @@ const PORT = Number(process.env.BRIDGE_PORT ?? 18632);
 const HOST = process.env.BRIDGE_HOST ?? '127.0.0.1';
 
 // charIds, see InfiniSim sim/gatt_bridge.h
-const CHAR = { scheduleSync: 0, scheduleDigest: 1, currentTime: 2, newAlert: 3, battery: 4 };
+const CHAR = { scheduleSync: 0, scheduleDigest: 1, currentTime: 2, newAlert: 3, battery: 4, eventRead: 5 };
 const OP = { write: 0, read: 1 };
 
 let failures = 0;
@@ -75,8 +75,8 @@ class Bridge {
 
 // ---- protocol encoders (mirrors of the future app's scheduleProtocol.ts) ----
 
-function encodeEventRecord({ id, ruleKind, hour, minute, anchor, param, enabled, title }) {
-  const b = Buffer.alloc(35);
+function encodeEventRecord({ id, ruleKind, hour, minute, anchor, param, enabled, title, lastModified = 0 }) {
+  const b = Buffer.alloc(39);
   b.writeUInt16LE(id, 0);
   b[2] = ruleKind; // 0 once, 1 everyNdays, 2 weekly, 3 monthly
   b[3] = hour;
@@ -88,7 +88,18 @@ function encodeEventRecord({ id, ruleKind, hour, minute, anchor, param, enabled,
   b[10] = enabled ? 1 : 0;
   const t = Buffer.from(title, 'utf8').subarray(0, 23);
   t.copy(b, 11);
+  b.writeUInt32LE(lastModified, 35);
   return b;
+}
+
+async function readAllEvents(bridge, count) {
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    let r = await bridge.write(CHAR.eventRead, Buffer.from([i]));
+    r = await bridge.read(CHAR.eventRead);
+    out.push(Buffer.from(r.payload));
+  }
+  return out;
 }
 
 const beginSync = (count, version) => {
@@ -97,7 +108,7 @@ const beginSync = (count, version) => {
   b.writeUInt32LE(version, 3);
   return b;
 };
-const eventMsg = (index, record) => Buffer.concat([Buffer.from([1, 0, index]), record]);
+const eventMsg = (index, record) => Buffer.concat([Buffer.from([1, 1, index]), record]);
 const commitSync = (count) => Buffer.from([2, 0, count]);
 const abortSync = () => Buffer.from([3, 0]);
 
@@ -140,10 +151,11 @@ console.log(`connected to GATT bridge at ${HOST}:${PORT}`);
   const rec = encodeEventRecord({
     id: 1, ruleKind: 2, hour: 17, minute: 0,
     anchor: new Date(2026, 6, 13), param: 0x2a, enabled: true, title: 'Quran practice',
+    lastModified: 1784000000,
   });
   const golden = Buffer.from(
     '01000211' + '00' + 'ea07070d' + '2a01' +
-    '517572616e207072616374696365' + '00'.repeat(10), 'hex');
+    '517572616e207072616374696365' + '00'.repeat(10) + '00ae556a', 'hex');
   check(rec.equals(golden), 'encoder matches golden vector', rec.toString('hex'));
 }
 
@@ -168,7 +180,7 @@ const VERSION = 424242;
   r = await bridge.read(CHAR.scheduleDigest);
   const d = decodeDigest(r.payload);
   check(d.count === 3 && d.version === VERSION, 'digest reflects committed sync', JSON.stringify(d));
-  check(d.proto === 0 && d.capacity === 16, 'digest proto/capacity', JSON.stringify(d));
+  check(d.proto === 1 && d.capacity === 16, 'digest proto/capacity', JSON.stringify(d));
 }
 
 // 4. Protocol violations are rejected and leave state intact
@@ -204,7 +216,54 @@ const VERSION = 424242;
   await bridge.write(CHAR.scheduleSync, abortSync());
 }
 
-// 6. CTS time set: jump the watch clock to a distinctive time (time travel!)
+// 6. Event read-back: pull the schedule and verify byte-exact round trip
+{
+  let r = await bridge.read(CHAR.scheduleDigest);
+  const d = decodeDigest(r.payload);
+  const pulled = await readAllEvents(bridge, d.count);
+  check(pulled.length === 3, 'pulled all records', `${pulled.length}`);
+  const expected = encodeEventRecord({
+    id: 2, ruleKind: 2, hour: 17, minute: 0,
+    anchor: new Date(), param: 0x2a, enabled: true, title: 'Quran practice',
+  });
+  const quran = pulled.find((p) => p.readUInt16LE(0) === 2);
+  check(!!quran && quran.subarray(2, 5).equals(expected.subarray(2, 5)) &&
+        quran.subarray(9, 35).equals(expected.subarray(9, 35)),
+        'read-back record matches what was written');
+
+  r = await bridge.write(CHAR.eventRead, Buffer.from([9]));
+  check(r.status !== 0, 'out-of-range read select rejected');
+}
+
+// 7. Two-client pull/merge/push mechanics: a fresh client B adopts A's schedule,
+//    adds its own event, then A sees B's addition after a pull.
+{
+  let r = await bridge.read(CHAR.scheduleDigest);
+  let d = decodeDigest(r.payload);
+  const theirs = await readAllEvents(bridge, d.count); // client B pulls
+  const bNew = encodeEventRecord({
+    id: 0x7777, ruleKind: 1, hour: 7, minute: 45,
+    anchor: new Date(), param: 1, enabled: true, title: 'Added by phone B',
+    lastModified: Math.floor(Date.now() / 1000),
+  });
+  const merged = [...theirs, bNew];
+  const B_VERSION = 990001;
+  await bridge.write(CHAR.scheduleSync, beginSync(merged.length, B_VERSION));
+  for (const [i, rec] of merged.entries()) {
+    await bridge.write(CHAR.scheduleSync, eventMsg(i, rec));
+  }
+  r = await bridge.write(CHAR.scheduleSync, commitSync(merged.length));
+  check(r.status === 0, 'client B merged push accepted');
+  await sleep(300);
+  r = await bridge.read(CHAR.scheduleDigest);
+  d = decodeDigest(r.payload);
+  check(d.count === 4 && d.version === B_VERSION, "client B's merge is live", JSON.stringify(d));
+  const afterB = await readAllEvents(bridge, d.count); // client A pulls
+  check(afterB.some((p) => p.readUInt16LE(0) === 0x7777), "client A sees B's event after pull");
+  check(afterB.filter((p) => p.readUInt16LE(0) !== 0x7777).length === 3, "A's original events survived B's sync");
+}
+
+// 8. CTS time set: jump the watch clock to a distinctive time (time travel!)
 {
   const target = new Date(2026, 11, 25, 10, 8, 0); // Dec 25 2026 10:08
   const r = await bridge.write(CHAR.currentTime, encodeCts(target));

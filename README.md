@@ -38,6 +38,15 @@ tests can talk to the simulated watch with real protocol bytes. `node bridge-tes
 is the standing protocol regression (schedule sync, digest, violation handling, CTS
 time-travel, notifications, battery) — run it after firmware protocol changes.
 
+`companion-cli.mjs` is a second companion (and the computer-syncing story): it speaks the
+same wire protocol through the bridge, so you can drive a two-device scenario locally.
+
+```sh
+node companion-cli.mjs list
+node companion-cli.mjs add "Quran practice" 17:00 weekly Mon,Wed,Fri
+node companion-cli.mjs delete "Quran practice"
+```
+
 `build-asan/` in InfiniSim is an AddressSanitizer build (`LD_PRELOAD` libasan to run);
 a wake/sleep stress loop under it is the regression test for the LVGL thread race fixed
 in `sim/displayapp/LvglGuard.h`.
