@@ -180,7 +180,7 @@ const VERSION = 424242;
   r = await bridge.read(CHAR.scheduleDigest);
   const d = decodeDigest(r.payload);
   check(d.count === 3 && d.version === VERSION, 'digest reflects committed sync', JSON.stringify(d));
-  check(d.proto === 1 && d.capacity === 16, 'digest proto/capacity', JSON.stringify(d));
+  check(d.proto === 1 && d.capacity === 64, 'digest proto/capacity', JSON.stringify(d));
 }
 
 // 4. Protocol violations are rejected and leave state intact
@@ -190,7 +190,7 @@ const VERSION = 424242;
   })));
   check(r.status !== 0, 'EventRecord without BeginSync rejected');
 
-  r = await bridge.write(CHAR.scheduleSync, beginSync(17, 1)); // over capacity
+  r = await bridge.write(CHAR.scheduleSync, beginSync(65, 1)); // over capacity
   check(r.status !== 0, 'BeginSync over capacity rejected');
 
   r = await bridge.write(CHAR.scheduleSync, beginSync(2, 777));
