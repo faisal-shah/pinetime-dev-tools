@@ -40,11 +40,21 @@ is the standing protocol regression (schedule sync incl. 64-event, out-of-order 
 disconnect-mid-sync cases, digest, event read-back, violation handling, CTS
 time-travel, notifications, battery) — run it after firmware protocol changes.
 
-Two slower scenario regressions for the flash-resident schedule storage:
+Scenario regressions (each leaves the sim running):
 `./powerloss-test.sh` kills the sim mid-sync and proves (littlefs-do post-mortem)
 that the active schedule survives and the partial staging file is cleaned up at
-boot; `./reminder-fire-test.sh` (~2 min) proves a reminder fires from sleep with
-combined same-second titles and that dismiss works. Both leave the sim running.
+boot; `./reminder-fire-test.sh` (~2 min) proves a schedule reminder fires from
+sleep with combined same-second titles and that dismiss works;
+`./prayer-fire-test.sh` (~4 min) writes prayer settings, warps the clock to just
+before a prayer, and proves the alert fires from sleep (RAM-only path, flash
+tripwire armed), dismiss reschedules, settings survive a reboot, and alerts-off
+suppresses the alert.
+
+`simnav.py` is a screenshot-verified UI navigator (with retries) that codifies
+the two sim input gotchas: key-injected swipes and button wakes don't reset
+LVGL's idle-activity clock, so blind tap sequences randomly hit sleep; and the
+reliable way home from any state is to hold the button until the Screen-is-OFF
+overlay shows, then wake.
 
 `companion-cli.mjs` is a second companion (and the computer-syncing story): it speaks the
 same wire protocol through the bridge, so you can drive a two-device scenario locally.
