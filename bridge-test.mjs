@@ -15,7 +15,7 @@ const PORT = Number(process.env.BRIDGE_PORT ?? 18632);
 const HOST = process.env.BRIDGE_HOST ?? '127.0.0.1';
 
 // charIds, see InfiniSim sim/gatt_bridge.h
-const CHAR = { scheduleSync: 0, scheduleDigest: 1, currentTime: 2, newAlert: 3, battery: 4, eventRead: 5, prayerSettings: 6 };
+const CHAR = { scheduleSync: 0, scheduleDigest: 1, currentTime: 2, newAlert: 3, battery: 4, eventRead: 5, prayerSettings: 6, beaconKey: 7, beaconControl: 8 };
 const OP = { write: 0, read: 1 };
 
 let failures = 0;
@@ -399,6 +399,35 @@ const mkSlotEvent = (i) => ({
   r = await bridge3.read(CHAR.prayerSettings);
   check(r.status === 0 && r.payload.equals(golden), 'rejected writes left settings untouched');
   bridge3.close();
+}
+
+
+// 14. Beacon (Find My) provisioning: write a 28-byte advertisement key, confirm
+//     via the read-back status byte, and exercise validation. The watch stores
+//     the key (no crypto) for beacon mode.
+{
+  const bridge4 = await Bridge.connect();
+  // hasKey should be 0 before provisioning (fresh flash) OR 1 if a prior run
+  // left a key; write a fresh key and assert it reads back as present.
+  const advKey = Buffer.from(Array.from({ length: 28 }, (_, i) => i + 1));
+  let r = await bridge4.write(CHAR.beaconKey, advKey);
+  check(r.status === 0, 'beacon key write accepted');
+  await sleep(300); // commit runs on the SystemTask
+  r = await bridge4.read(CHAR.beaconKey);
+  check(r.status === 0 && r.payload.length === 1 && r.payload[0] === 1, 'beacon key read-back reports hasKey=1', r.payload?.toString('hex'));
+
+  r = await bridge4.write(CHAR.beaconKey, advKey.subarray(0, 20));
+  check(r.status !== 0, 'short beacon key rejected');
+  r = await bridge4.write(CHAR.beaconKey, Buffer.concat([advKey, Buffer.from([0])]));
+  check(r.status !== 0, 'oversized beacon key rejected');
+
+  // control: enable command accepted once a key exists (the sim NimbleController
+  // stub makes the radio transition a no-op; we only check the write is taken).
+  r = await bridge4.write(CHAR.beaconControl, Buffer.from([0x01]));
+  check(r.status === 0, 'beacon enable command accepted with a key present');
+  r = await bridge4.write(CHAR.beaconControl, Buffer.from([0x02]));
+  check(r.status !== 0, 'unknown beacon control command rejected');
+  bridge4.close();
 }
 
 console.log(`\n${checks} checks, ${failures} failures`);
