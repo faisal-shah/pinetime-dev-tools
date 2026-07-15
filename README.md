@@ -38,7 +38,10 @@ change): the watch's BLE characteristics served over TCP, so companion-app code 
 tests can talk to the simulated watch with real protocol bytes. `node bridge-test.mjs`
 is the standing protocol regression (schedule sync incl. 64-event, out-of-order and
 disconnect-mid-sync cases, digest, event read-back, violation handling, CTS
-time-travel, notifications, battery) — run it after firmware protocol changes.
+time-travel, notifications, battery, prayer settings, Find My beacon provisioning)
+— run it after firmware protocol changes. Note the sim stubs the BLE radio, so the
+GATT protocol is fully exercised but advertising (incl. the Find My beacon
+transition) is hardware-only.
 
 Scenario regressions (each leaves the sim running):
 `./powerloss-test.sh` kills the sim mid-sync and proves (littlefs-do post-mortem)
