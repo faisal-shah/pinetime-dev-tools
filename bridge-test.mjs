@@ -390,10 +390,24 @@ const mkSlotEvent = (i) => ({
   badLat.writeInt16LE(9001, 4);
   r = await bridge3.write(CHAR.prayerSettings, badLat);
   check(r.status !== 0, 'out-of-range latitude rejected');
+  // flags: bit0 = alerts on, bit1 = skip Fajr. 0x03 is the valid "all but
+  // Fajr" mode, so the reserved-bit case has to reach past it.
   const badFlags = Buffer.from(golden);
-  badFlags[3] = 0x03; // reserved bit set
+  badFlags[3] = 0x04; // reserved bit set
   r = await bridge3.write(CHAR.prayerSettings, badFlags);
   check(r.status !== 0, 'reserved flag bits rejected');
+  const skipWithoutEnable = Buffer.from(golden);
+  skipWithoutEnable[3] = 0x02; // skip-Fajr without the enable bit is meaningless
+  r = await bridge3.write(CHAR.prayerSettings, skipWithoutEnable);
+  check(r.status !== 0, 'skip-Fajr without the enable bit rejected');
+  const allButFajr = Buffer.from(golden);
+  allButFajr[3] = 0x03;
+  r = await bridge3.write(CHAR.prayerSettings, allButFajr);
+  check(r.status === 0, 'all-but-Fajr flags accepted');
+  // ...and put the golden settings back so the untouched-check below is about
+  // the rejected writes, not this one.
+  r = await bridge3.write(CHAR.prayerSettings, golden);
+  check(r.status === 0, 'golden prayer settings restored');
 
   await sleep(300);
   r = await bridge3.read(CHAR.prayerSettings);
