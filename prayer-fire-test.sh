@@ -87,7 +87,7 @@ check $((1 - A)) "sim asleep before Dhuhr"
 echo "waiting 55 s more for the alert to fire from sleep..."
 sleep 55
 sim_alive && ALIVE=1 || ALIVE=0
-check $ALIVE "sim alive after fire (no flash-asleep tripwire abort)"
+check "$ALIVE" "sim alive after fire (no flash-asleep tripwire abort)"
 ./simctl.py shot prayer-alert >/dev/null
 if is_alert shots/prayer-alert.png; then R=1; else R=0; fi
 check $R "prayer alert on screen (Dhuhr + OK button)"
@@ -104,18 +104,26 @@ sleep 2
 node - "$BLOB_ALERTS_ON" <<'EOF' && PERSIST=1 || PERSIST=0
 import net from 'node:net';
 const blob = Buffer.from(process.argv[2], 'hex');
+// Accumulate: the reply is a TCP stream, so comparing the blob against whatever
+// the first chunk happened to hold fails whenever it arrives split -- and reads
+// as "the settings did not survive the reboot".
+let buf = Buffer.alloc(0);
 const s = net.connect(18632, '127.0.0.1', () => s.write(Buffer.from([6, 1, 0, 0])));
-s.on('data', (d) => process.exit(d[0] === 0 && d.subarray(3).equals(blob) ? 0 : 1));
+s.on('data', (d) => {
+  buf = Buffer.concat([buf, d]);
+  if (buf.length < 3 + blob.length) return;
+  process.exit(buf[0] === 0 && buf.subarray(3, 3 + blob.length).equals(blob) ? 0 : 1);
+});
 setTimeout(() => process.exit(1), 5000);
 EOF
-check $PERSIST "settings survive a reboot byte-exact"
+check "$PERSIST" "settings survive a reboot byte-exact"
 
 # --- 3. Alerts off: no alert fires ------------------------------------------
 configure "$BLOB_ALERTS_OFF" 13 00 30
 echo "waiting 95 s past Dhuhr with alerts off..."
 sleep 95
 sim_alive && ALIVE=1 || ALIVE=0
-check $ALIVE "sim alive (alerts-off path)"
+check "$ALIVE" "sim alive (alerts-off path)"
 ./simctl.py shot prayer-suppressed >/dev/null
 if is_alert shots/prayer-suppressed.png; then S=1; else S=0; fi
 check $((1 - S)) "no alert with alerts disabled"

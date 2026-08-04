@@ -96,10 +96,25 @@ def press_mouse(state, button):
 
 
 def free_display():
+    """First display with no live X server on it.
+
+    A lock file whose pid is gone is stale, not in use. `simctl.py kill` -- the
+    power-loss simulation, which powerloss-test.sh runs every time -- leaves one
+    behind on every run, so treating any lock file as "taken" meant the sim
+    became unstartable after about thirty of them, with nothing to point at but
+    "no free X display found".
+    """
     for n in range(99, 130):
-        if not Path(f"/tmp/.X{n}-lock").exists():
+        lock = Path(f"/tmp/.X{n}-lock")
+        if not lock.exists():
             return f":{n}"
-    die("no free X display found")
+        try:
+            pid = int(lock.read_text().strip())
+            os.kill(pid, 0)
+        except (ValueError, OSError):
+            lock.unlink(missing_ok=True)  # stale: the server that held it is gone
+            return f":{n}"
+    die("no free X display found (all 99-129 have a live server)")
 
 
 def window_origin(state):
