@@ -308,3 +308,9 @@ An InfiniTime app lives in `../InfiniTime/src/displayapp/screens/`, is registere
 `src/displayapp/apps/Apps.h.in` + `UserApps.h`, and gets instantiated in
 `DisplayApp.cpp`. To control which apps are compiled in, configure the sim with
 `-DENABLE_USERAPPS="Apps::Timer,Apps::Alarm,..."`.
+
+## Agent handoff
+
+Agents continuing this work must read `.memory/context.md`,
+`.memory/progress.md`, and `.memory/lessons.md`. Start from the physical fleet
+gate in `RELEASE.md`; automated implementation and validation are complete.
