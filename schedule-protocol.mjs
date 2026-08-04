@@ -11,11 +11,13 @@
 // Mirrors src/components/schedule/ScheduleRules.h (Event, 43 bytes) and
 // ScheduleController.h (ProtocolVersion). Keep in step with both.
 
+import { RECORDS } from './generated/companion-protocol.mjs';
+
 /** ScheduleController::ProtocolVersion — the per-record version byte. */
-export const RECORD_VERSION = 2;
+export const RECORD_VERSION = RECORDS.schedule.record_version;
 
 /** sizeof(ScheduleRules::Event); there is a static_assert on it in the firmware. */
-export const RECORD_BYTES = 43;
+export const RECORD_BYTES = RECORDS.schedule.record_size;
 
 /**
  * One event record.

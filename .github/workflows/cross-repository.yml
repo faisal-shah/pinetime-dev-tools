@@ -1,0 +1,233 @@
+name: Cross-repository CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      infinitime_ref:
+        description: InfiniTime branch, tag, or full SHA
+        required: true
+        default: family-features
+        type: string
+      infinisim_ref:
+        description: InfiniSim branch, tag, or full SHA
+        required: true
+        default: family-features
+        type: string
+      companion_ref:
+        description: PineTimeCompanion branch, tag, or full SHA
+        required: true
+        default: master
+        type: string
+      devtools_ref:
+        description: pinetime-dev-tools branch, tag, or full SHA
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-repository-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      infinitime_sha: ${{ steps.refs.outputs.infinitime_sha }}
+      infinisim_sha: ${{ steps.refs.outputs.infinisim_sha }}
+      companion_sha: ${{ steps.refs.outputs.companion_sha }}
+      devtools_sha: ${{ steps.refs.outputs.devtools_sha }}
+    env:
+      REPOSITORY_OWNER: ${{ github.repository_owner }}
+      INFINITIME_REF: ${{ inputs.infinitime_ref || 'family-features' }}
+      INFINISIM_REF: ${{ inputs.infinisim_ref || 'family-features' }}
+      COMPANION_REF: ${{ inputs.companion_ref || 'master' }}
+      DEVTOOLS_REF: ${{ inputs.devtools_ref || github.sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Resolve requested refs to immutable SHAs
+        id: refs
+        run: |
+          set -euo pipefail
+
+          resolve_ref() {
+            repository="$1"
+            requested="$2"
+            output="$3"
+
+            if [[ "$requested" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              sha="${requested,,}"
+            else
+              encoded_ref="$(python3 -c \
+                'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' \
+                "$requested")"
+              sha="$(
+                gh api \
+                  "repos/$REPOSITORY_OWNER/$repository/commits/$encoded_ref" \
+                  --jq '.sha'
+              )"
+            fi
+
+            if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "Invalid resolved SHA for $repository: $sha" >&2
+              return 1
+            fi
+            echo "${output}_sha=$sha" >> "$GITHUB_OUTPUT"
+          }
+
+          resolve_ref InfiniTime "$INFINITIME_REF" infinitime
+          resolve_ref InfiniSim "$INFINISIM_REF" infinisim
+          resolve_ref PineTimeCompanion "$COMPANION_REF" companion
+          resolve_ref pinetime-dev-tools "$DEVTOOLS_REF" devtools
+
+  integration:
+    needs: resolve
+    runs-on: ubuntu-latest
+    env:
+      FAMILY_WORKSPACE: ${{ github.workspace }}/family
+      INFINITIME_SHA: ${{ needs.resolve.outputs.infinitime_sha }}
+      INFINISIM_SHA: ${{ needs.resolve.outputs.infinisim_sha }}
+      COMPANION_SHA: ${{ needs.resolve.outputs.companion_sha }}
+      DEVTOOLS_SHA: ${{ needs.resolve.outputs.devtools_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/InfiniTime
+          ref: ${{ env.INFINITIME_SHA }}
+          path: family/InfiniTime
+          submodules: recursive
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/InfiniSim
+          ref: ${{ env.INFINISIM_SHA }}
+          path: family/InfiniSim
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/PineTimeCompanion
+          ref: ${{ env.COMPANION_SHA }}
+          path: family/PineTimeCompanion
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ env.DEVTOOLS_SHA }}
+          path: family/pinetime-dev-tools
+
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: family/PineTimeCompanion/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Record selected revisions
+        run: |
+          {
+            echo "## Selected immutable revisions"
+            echo
+            echo "| Repository | SHA |"
+            echo "|---|---|"
+            echo "| InfiniTime | \`$INFINITIME_SHA\` |"
+            echo "| InfiniSim | \`$INFINISIM_SHA\` |"
+            echo "| PineTimeCompanion | \`$COMPANION_SHA\` |"
+            echo "| pinetime-dev-tools | \`$DEVTOOLS_SHA\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get -y install --no-install-recommends \
+            cmake \
+            libsdl2-dev \
+            libpng-dev \
+            ninja-build \
+            python3-pil
+          npm install -g lv_font_conv@1.5.2
+
+      - name: Checkout InfiniSim runtime submodules
+        working-directory: family/InfiniSim
+        run: git submodule update --init lv_drivers
+
+      - name: Verify every generated protocol contract
+        run: |
+          uv run --script "$FAMILY_WORKSPACE/InfiniTime/tools/generate_companion_protocol.py" \
+            --workspace-root "$FAMILY_WORKSPACE" \
+            --targets infinitime,infinisim,companion,devtools \
+            --check
+
+      - name: Install and test ptlab
+        working-directory: family/pinetime-dev-tools
+        run: |
+          uv sync --frozen
+          uv run pytest -q
+          uv build
+
+      - name: Build and test firmware host logic and advertising software proxy
+        run: |
+          cmake -S "$FAMILY_WORKSPACE/InfiniTime/tests/host" \
+            -B "$FAMILY_WORKSPACE/InfiniTime/build-host-tests" \
+            -G Ninja
+          cmake --build "$FAMILY_WORKSPACE/InfiniTime/build-host-tests"
+          ctest --test-dir "$FAMILY_WORKSPACE/InfiniTime/build-host-tests" \
+            --output-on-failure \
+            --output-junit junit.xml
+
+      - name: Build and test simulator
+        run: |
+          cmake -S "$FAMILY_WORKSPACE/InfiniSim" \
+            -B "$FAMILY_WORKSPACE/InfiniSim/build" \
+            -G Ninja \
+            -DInfiniTime_DIR="$FAMILY_WORKSPACE/InfiniTime" \
+            -DENABLE_BLE_TEST_CONTROL=ON
+          cmake --build "$FAMILY_WORKSPACE/InfiniSim/build"
+          ctest --test-dir "$FAMILY_WORKSPACE/InfiniSim/build" \
+            --output-on-failure \
+            --output-junit ctest-junit.xml
+
+      - name: Install companion dependencies
+        working-directory: family/PineTimeCompanion
+        run: npm ci
+
+      - name: Test companion contracts and pure logic
+        working-directory: family/PineTimeCompanion
+        run: |
+          npm run typecheck
+          npm test
+          npm run test:kotlin
+          npm run web:export
+
+      - name: Run deterministic headless scenarios
+        working-directory: family/pinetime-dev-tools
+        run: |
+          uv run ptlab \
+            --workspace-root "$FAMILY_WORKSPACE" \
+            run \
+            --target sim \
+            --suite all \
+            --filter fast \
+            --runs-dir "${GITHUB_WORKSPACE}/scenario-artifacts"
+
+      - name: Upload scenario artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptlab-scenario-artifacts-${{ github.run_id }}
+          path: scenario-artifacts
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload scenario JUnit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptlab-scenario-junit-${{ github.run_id }}
+          path: scenario-artifacts/*/junit.xml
+          if-no-files-found: warn
+          retention-days: 14

@@ -2,3 +2,8 @@ run/
 run-asan/
 shots/
 __pycache__/
+.ptlab/
+.pytest_cache/
+.venv/
+dist/
+*.egg-info/

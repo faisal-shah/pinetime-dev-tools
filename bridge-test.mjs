@@ -10,12 +10,11 @@
 // code paths a real BLE central would hit.
 
 import net from 'node:net';
+import { BRIDGE_CHAR as CHAR } from './generated/companion-protocol.mjs';
 
 const PORT = Number(process.env.BRIDGE_PORT ?? 18632);
 const HOST = process.env.BRIDGE_HOST ?? '127.0.0.1';
 
-// charIds, see InfiniSim sim/gatt_bridge.h
-const CHAR = { scheduleSync: 0, scheduleDigest: 1, currentTime: 2, newAlert: 3, battery: 4, eventRead: 5, prayerSettings: 6, beaconKey: 7, beaconControl: 8 };
 const OP = { write: 0, read: 1 };
 
 let failures = 0;
@@ -334,6 +333,7 @@ const mkSlotEvent = (i) => ({
   await bridge.write(CHAR.scheduleSync, eventMsg(0, encodeEventRecord(mkSlotEvent(0))));
   bridge.socket.destroy(); // vanish mid-transaction, no Abort
 
+  await sleep(100); // single-client bridge must observe incumbent EOF before B connects
   const bridge2 = await Bridge.connect();
   await sleep(300); // let the bridge notice and run OnDisconnect
   let r = await bridge2.read(CHAR.scheduleDigest);
@@ -358,6 +358,7 @@ const mkSlotEvent = (i) => ({
 //     leave the stored settings untouched.
 {
   const golden = Buffer.from('010101015c10c5ddec', 'hex'); // Chicago, ISNA, Hanafi, alerts on, UTC-5
+  await sleep(100);
   const bridge3 = await Bridge.connect();
   let r = await bridge3.write(CHAR.prayerSettings, golden);
   check(r.status === 0, 'prayer settings write accepted');
@@ -412,6 +413,7 @@ const mkSlotEvent = (i) => ({
 //     via the read-back status byte, and exercise validation. The watch stores
 //     the key (no crypto) for beacon mode.
 {
+  await sleep(100);
   const bridge4 = await Bridge.connect();
   // hasKey should be 0 before provisioning (fresh flash) OR 1 if a prior run
   // left a key; write a fresh key and assert it reads back as present.
@@ -427,12 +429,12 @@ const mkSlotEvent = (i) => ({
   r = await bridge4.write(CHAR.beaconKey, Buffer.concat([advKey, Buffer.from([0])]));
   check(r.status !== 0, 'oversized beacon key rejected');
 
-  // control: enable command accepted once a key exists (the sim NimbleController
-  // stub makes the radio transition a no-op; we only check the write is taken).
-  r = await bridge4.write(CHAR.beaconControl, Buffer.from([0x01]));
-  check(r.status === 0, 'beacon enable command accepted with a key present');
+  // Validate before enabling: the real virtual radio policy terminates the
+  // connected link when beacon mode is accepted.
   r = await bridge4.write(CHAR.beaconControl, Buffer.from([0x02]));
   check(r.status !== 0, 'unknown beacon control command rejected');
+  r = await bridge4.write(CHAR.beaconControl, Buffer.from([0x01]));
+  check(r.status === 0, 'beacon enable command accepted with a key present');
   bridge4.close();
 }
 

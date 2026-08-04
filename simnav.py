@@ -3,16 +3,17 @@
 Usage: navigate.py <target>  where target in {prayer-menu}
 Leaves the sim on the SettingPrayer list screen."""
 import subprocess, sys, time
+from pathlib import Path
 from PIL import Image
 
-TOOLS = '/home/faisal/repos/faisal-shah/pinetime-dev-tools'
+TOOLS = Path(__file__).resolve().parent
 
 def run(*args):
-    subprocess.run([f'{TOOLS}/simctl.py', *args], capture_output=True, cwd=TOOLS)
+    subprocess.run([str(TOOLS / 'simctl.py'), *args], capture_output=True, cwd=TOOLS)
 
 def shot(name='nav-probe'):
     run('shot', name)
-    return Image.open(f'{TOOLS}/shots/{name}.png').convert('RGB')
+    return Image.open(TOOLS / 'shots' / f'{name}.png').convert('RGB')
 
 def is_off(img):
     """The 'Screen is OFF' overlay: black screen, white text only in one band."""

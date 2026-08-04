@@ -1,0 +1,1 @@
+../../../generated/companion_protocol.py

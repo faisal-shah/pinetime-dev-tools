@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "watch_label": "Kid A PineTime",
+  "peers": [
+    {
+      "label": "parent-a",
+      "kind": "android",
+      "serial": "ANDROID_ADB_SERIAL_A",
+      "address": "AA:BB:CC:DD:EE:01"
+    },
+    {
+      "label": "parent-b",
+      "kind": "android",
+      "serial": "ANDROID_ADB_SERIAL_B",
+      "address": "AA:BB:CC:DD:EE:01"
+    },
+    {
+      "label": "linux-laptop",
+      "kind": "linux",
+      "address": "AA:BB:CC:DD:EE:01",
+      "adapter": "hci0"
+    }
+  ],
+  "sequence": [
+    "parent-a",
+    "parent-b",
+    "linux-laptop",
+    "parent-a"
+  ]
+}

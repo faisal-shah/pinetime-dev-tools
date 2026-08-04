@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      infinitime_ref:
+        description: InfiniTime branch, tag, or full SHA providing the generated contract
+        required: true
+        default: family-features
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  INFINITIME_REF: ${{ inputs.infinitime_ref || 'family-features' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: family/pinetime-dev-tools
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/InfiniTime
+          ref: ${{ env.INFINITIME_REF }}
+          path: family/InfiniTime
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Record selected revisions
+        run: |
+          {
+            echo "## Selected revisions"
+            echo
+            echo "| Repository | Requested ref | Resolved SHA |"
+            echo "|---|---|---|"
+            echo "| pinetime-dev-tools | event SHA | $(git -C family/pinetime-dev-tools rev-parse HEAD) |"
+            echo "| InfiniTime | \`$INFINITIME_REF\` | $(git -C family/InfiniTime rev-parse HEAD) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify generated ptlab contract
+        run: |
+          uv run --script family/InfiniTime/tools/generate_companion_protocol.py \
+            --workspace-root family \
+            --targets devtools \
+            --check
+
+      - name: Install locked dependencies
+        working-directory: family/pinetime-dev-tools
+        run: uv sync --frozen
+
+      - name: Run tests
+        working-directory: family/pinetime-dev-tools
+        run: uv run pytest -q
+
+      - name: Build package
+        working-directory: family/pinetime-dev-tools
+        run: uv build

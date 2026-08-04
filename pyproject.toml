@@ -1,0 +1,30 @@
+[build-system]
+requires = ["uv_build>=0.9.16,<0.10.0"]
+build-backend = "uv_build"
+
+[project]
+name = "ptlab"
+version = "0.1.0"
+description = "Local orchestration for the PineTime family workspace"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "orjson>=3.10.0",
+]
+
+[project.scripts]
+ptlab = "ptlab.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.0",
+]
+hardware = [
+  "bleak>=1.1,<4",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.uv.build-backend]
+module-root = "src"

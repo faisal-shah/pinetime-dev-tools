@@ -16,10 +16,10 @@
 
 import net from 'node:net';
 import { encodeEventRecord, eventMsg } from './schedule-protocol.mjs';
+import { BRIDGE_CHAR as CHAR } from './generated/companion-protocol.mjs';
 
 const PORT = Number(process.env.BRIDGE_PORT ?? 18632);
 const HOST = process.env.BRIDGE_HOST ?? '127.0.0.1';
-const CHAR = { scheduleSync: 0, scheduleDigest: 1, eventRead: 5 };
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 class Bridge {
