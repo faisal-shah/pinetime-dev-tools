@@ -104,9 +104,18 @@ sleep 2
 DIGEST_OK=0
 node - <<'EOF' && DIGEST_OK=1 || true
 import net from 'node:net';
+// Accumulate: the reply is a TCP stream, not a datagram. Parsing whatever the
+// first chunk happened to contain threw ERR_BUFFER_OUT_OF_BOUNDS whenever it
+// arrived split, killing this script and failing the test for a reason that had
+// nothing to do with the filesystem.
+const HEADER = 3;
+const DIGEST = 7; // proto, capacity, count, version(u32)
+let buf = Buffer.alloc(0);
 const s = net.connect(18632, '127.0.0.1', () => s.write(Buffer.from([1, 1, 0, 0])));
 s.on('data', (d) => {
-  const p = d.subarray(3);
+  buf = Buffer.concat([buf, d]);
+  if (buf.length < HEADER + DIGEST) return;
+  const p = buf.subarray(HEADER);
   const ok = p[2] === 3 && p.readUInt32LE(3) === 31337;
   console.log('post-reboot digest: count=' + p[2] + ', version=' + p.readUInt32LE(3));
   process.exit(ok ? 0 : 1);

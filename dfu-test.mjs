@@ -69,15 +69,19 @@ class Link {
     this.socket = socket;
     this.notifications = [];
     this.waiters = [];
+    this.buffer = Buffer.alloc(0);
     socket.on('data', (d) => this.onData(d));
   }
 
   onData(d) {
-    // Responses to our writes and control-point notifications share the stream;
-    // both are consumed by whoever is waiting.
-    this.notifications.push(d);
+    // Accumulate rather than treating each chunk as a message: this is a TCP
+    // stream, so a reply can arrive split and a pattern scanned per-chunk would
+    // be missed. Responses to our writes and control-point notifications share
+    // the stream; both are consumed by whoever is waiting.
+    this.buffer = Buffer.concat([this.buffer, d]);
+    this.notifications.push(this.buffer);
     const w = this.waiters.shift();
-    if (w) w(d);
+    if (w) w(this.buffer);
   }
 
   write(ch, payload) {
