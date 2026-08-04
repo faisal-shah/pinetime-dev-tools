@@ -15,6 +15,7 @@
 // what a second family phone does on its first sync.
 
 import net from 'node:net';
+import { encodeEventRecord, eventMsg } from './schedule-protocol.mjs';
 
 const PORT = Number(process.env.BRIDGE_PORT ?? 18632);
 const HOST = process.env.BRIDGE_HOST ?? '127.0.0.1';
@@ -69,24 +70,22 @@ const decodeRecord = (b) => ({
   enabled: (b[10] & 1) !== 0,
   title: b.subarray(11, 35).toString('utf8').replace(/\0.*$/s, ''),
   lastModified: b.readUInt32LE(35),
+  // Inclusive last day; year 0 means the rule never ends. Decoded so a
+  // read-modify-write through this CLI does not silently drop the end date.
+  endYear: b.readUInt16LE(39),
+  endMonth: b[41],
+  endDay: b[42],
   raw: Buffer.from(b),
 });
 
-function encodeRecord(e) {
-  const b = Buffer.alloc(39);
-  b.writeUInt16LE(e.id, 0);
-  b[2] = e.ruleKind;
-  b[3] = e.hour;
-  b[4] = e.minute;
-  b.writeUInt16LE(e.year, 5);
-  b[7] = e.month;
-  b[8] = e.day;
-  b[9] = e.param;
-  b[10] = e.enabled ? 1 : 0;
-  Buffer.from(e.title, 'utf8').subarray(0, 23).copy(b, 11);
-  b.writeUInt32LE(e.lastModified, 35);
-  return b;
-}
+// Wire format lives in schedule-protocol.mjs so the CLI, bridge-test and the
+// scenario scripts cannot drift apart.
+const encodeRecord = (e) =>
+  encodeEventRecord({
+    ...e,
+    anchor: new Date(e.year, e.month - 1, e.day),
+    end: e.endYear ? new Date(e.endYear, e.endMonth - 1, e.endDay) : undefined,
+  });
 
 const describeRule = (e) => {
   switch (e.ruleKind) {
@@ -118,7 +117,7 @@ async function push(bridge, events) {
   let r = await bridge.write(CHAR.scheduleSync, begin);
   if (r.status !== 0) throw new Error('BeginSync rejected');
   for (const [i, e] of events.entries()) {
-    r = await bridge.write(CHAR.scheduleSync, Buffer.concat([Buffer.from([1, 1, i]), encodeRecord(e)]));
+    r = await bridge.write(CHAR.scheduleSync, eventMsg(i, encodeRecord(e)));
     if (r.status !== 0) throw new Error(`record ${i} rejected`);
   }
   r = await bridge.write(CHAR.scheduleSync, Buffer.from([2, 0, events.length]));

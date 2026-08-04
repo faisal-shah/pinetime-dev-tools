@@ -31,9 +31,10 @@ sleep 2
 STAGER_LOG=$(mktemp)
 node - >"$STAGER_LOG" 2>&1 <<'EOF' &
 import net from 'node:net';
+import { encodeEventRecord, eventMsg } from './schedule-protocol.mjs';
 const req = (s, b) => new Promise((res) => { s.once('data', res); s.write(b); });
 const frame = (c, op, p = Buffer.alloc(0)) => { const h = Buffer.alloc(4); h[0]=c; h[1]=op; h.writeUInt16LE(p.length,2); return Buffer.concat([h,p]); };
-const rec = (id, title) => { const b = Buffer.alloc(39); b.writeUInt16LE(id,0); b[2]=1; b[3]=7; b[4]=30; b.writeUInt16LE(2026,5); b[7]=7; b[8]=14; b[9]=1; b[10]=1; b.write(title,11); b.writeUInt32LE(1789e6,35); return b; };
+const rec = (id, title) => encodeEventRecord({ id, ruleKind: 1, hour: 7, minute: 30, anchor: new Date(2026, 6, 14), param: 1, enabled: true, title, lastModified: 1789e6 });
 const s = net.connect(18632, '127.0.0.1');
 await new Promise((r) => s.on('connect', r));
 s.on('error', () => {}); // the sim dying under us is the point
@@ -42,7 +43,7 @@ s.on('error', () => {}); // the sim dying under us is the point
 let r = await req(s, frame(0, 0, Buffer.concat([Buffer.from([0,0,3]), Buffer.from(new Uint32Array([31337]).buffer)])));
 if (r[0] !== 0) { console.error('seed begin failed'); process.exit(1); }
 for (let i = 0; i < 3; i++) {
-  r = await req(s, frame(0, 0, Buffer.concat([Buffer.from([1,1,i]), rec(i+1, 'Seed ' + i)])));
+  r = await req(s, frame(0, 0, eventMsg(i, rec(i+1, 'Seed ' + i))));
   if (r[0] !== 0) { console.error('seed rec failed'); process.exit(1); }
 }
 r = await req(s, frame(0, 0, Buffer.from([2,0,3])));
@@ -57,7 +58,7 @@ if (d[2] !== 3 || d.readUInt32LE(3) !== 31337) { console.error('seed digest wron
 r = await req(s, frame(0, 0, Buffer.concat([Buffer.from([0,0,64]), Buffer.from(new Uint32Array([777777]).buffer)])));
 if (r[0] !== 0) { console.error('stage begin failed'); process.exit(1); }
 for (let i = 0; i < 32; i++) {
-  r = await req(s, frame(0, 0, Buffer.concat([Buffer.from([1,1,i]), rec(100+i, 'Doomed ' + i)])));
+  r = await req(s, frame(0, 0, eventMsg(i, rec(100+i, 'Doomed ' + i))));
   if (r[0] !== 0) { console.error('stage rec failed', i); process.exit(1); }
 }
 console.log('STAGED');
@@ -65,7 +66,7 @@ setTimeout(() => process.exit(0), 60000); // hold the socket until killed
 EOF
 STAGER=$!
 
-for i in $(seq 1 100); do
+for _ in $(seq 1 100); do
   grep -q "STAGED" "$STAGER_LOG" 2>/dev/null && break
   kill -0 $STAGER 2>/dev/null || { echo "stager died:"; cat "$STAGER_LOG"; exit 1; }
   sleep 0.2
@@ -83,15 +84,18 @@ sleep 0.5
 LS=$(lfsdo ls /.system 2>/dev/null || true)
 echo "$LS" | grep -q "schedule.dat" && DAT=1 || DAT=0
 echo "$LS" | grep -q "schedule.stg" && STG=1 || STG=0
-check $DAT "schedule.dat survived the power cut"
-check $STG "partial schedule.stg present after the power cut"
+check "$DAT" "schedule.dat survived the power cut"
+check "$STG" "partial schedule.stg present after the power cut"
 
-# header of schedule.dat: version=1, count=3, scheduleVersion=31337 (0x7a69)
+# header of schedule.dat: format version, count=3, scheduleVersion=31337 (0x7a69).
+# The leading byte is ScheduleController::scheduleFormatVersion -- bump both
+# together, since a stale expectation here fails as "header corrupted" and
+# reads like the power cut damaged the file.
 rm -f run/schedule.dat
 lfsdo cp /.system/schedule.dat . >/dev/null 2>&1 || true
 HDR=$(xxd -p -l 6 run/schedule.dat 2>/dev/null || echo missing)
-[ "$HDR" = "0103697a0000" ] && OK=1 || OK=0
-check $OK "schedule.dat header intact (v1, 3 events, version 31337) [$HDR]"
+[ "$HDR" = "0203697a0000" ] && OK=1 || OK=0
+check "$OK" "schedule.dat header intact (v2, 3 events, version 31337) [$HDR]"
 rm -f run/schedule.dat
 
 # 4. Reboot: the watch must load the old schedule and clean up the leftover.

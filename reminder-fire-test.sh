@@ -36,9 +36,10 @@ sleep 2
 
 node - <<'EOF'
 import net from 'node:net';
+import { encodeEventRecord, eventMsg } from './schedule-protocol.mjs';
 const req = (s, b) => new Promise((res) => { s.once('data', res); s.write(b); });
 const frame = (c, op, p = Buffer.alloc(0)) => { const h = Buffer.alloc(4); h[0]=c; h[1]=op; h.writeUInt16LE(p.length,2); return Buffer.concat([h,p]); };
-const rec = (id, title, h, m) => { const b = Buffer.alloc(39); b.writeUInt16LE(id,0); b[2]=0; b[3]=h; b[4]=m; b.writeUInt16LE(2026,5); b[7]=7; b[8]=14; b[9]=0; b[10]=1; b.write(title,11); b.writeUInt32LE(1789e6,35); return b; };
+const rec = (id, title, h, m) => encodeEventRecord({ id, ruleKind: 0, hour: h, minute: m, anchor: new Date(2026, 6, 14), param: 0, enabled: true, title, lastModified: 1789e6 });
 const cts = (h, m, sec) => { const b = Buffer.alloc(10); b.writeUInt16LE(2026,0); b[2]=7; b[3]=14; b[4]=h; b[5]=m; b[6]=sec; b[7]=2; return b; };
 const s = net.connect(18632, '127.0.0.1');
 await new Promise((r) => s.on('connect', r));
@@ -46,9 +47,9 @@ let r = await req(s, frame(2, 0, cts(11, 59, 50)));
 if (r[0] !== 0) { console.error('CTS failed'); process.exit(1); }
 r = await req(s, frame(0, 0, Buffer.concat([Buffer.from([0,0,2]), Buffer.from(new Uint32Array([424243]).buffer)])));
 if (r[0] !== 0) { console.error('begin failed'); process.exit(1); }
-r = await req(s, frame(0, 0, Buffer.concat([Buffer.from([1,1,0]), rec(1, 'Brush teeth', 12, 1)])));
+r = await req(s, frame(0, 0, eventMsg(0, rec(1, 'Brush teeth', 12, 1))));
 if (r[0] !== 0) { console.error('rec0 failed'); process.exit(1); }
-r = await req(s, frame(0, 0, Buffer.concat([Buffer.from([1,1,1]), rec(2, 'Pack bag', 12, 1)])));
+r = await req(s, frame(0, 0, eventMsg(1, rec(2, 'Pack bag', 12, 1))));
 if (r[0] !== 0) { console.error('rec1 failed'); process.exit(1); }
 r = await req(s, frame(0, 0, Buffer.from([2,0,2])));
 if (r[0] !== 0) { console.error('commit failed'); process.exit(1); }

@@ -73,24 +73,10 @@ class Bridge {
   close() { this.socket.end(); }
 }
 
-// ---- protocol encoders (mirrors of the future app's scheduleProtocol.ts) ----
-
-function encodeEventRecord({ id, ruleKind, hour, minute, anchor, param, enabled, title, lastModified = 0 }) {
-  const b = Buffer.alloc(39);
-  b.writeUInt16LE(id, 0);
-  b[2] = ruleKind; // 0 once, 1 everyNdays, 2 weekly, 3 monthly
-  b[3] = hour;
-  b[4] = minute;
-  b.writeUInt16LE(anchor.getFullYear(), 5);
-  b[7] = anchor.getMonth() + 1;
-  b[8] = anchor.getDate();
-  b[9] = param;
-  b[10] = enabled ? 1 : 0;
-  const t = Buffer.from(title, 'utf8').subarray(0, 23);
-  t.copy(b, 11);
-  b.writeUInt32LE(lastModified, 35);
-  return b;
-}
+// ---- protocol encoders ----
+// Shared with companion-cli.mjs and the scenario scripts so the record
+// layout has exactly one definition; see schedule-protocol.mjs.
+import { encodeEventRecord, beginSync, eventMsg, commitSync, abortSync } from './schedule-protocol.mjs';
 
 async function readAllEvents(bridge, count) {
   const out = [];
@@ -101,16 +87,6 @@ async function readAllEvents(bridge, count) {
   }
   return out;
 }
-
-const beginSync = (count, version) => {
-  const b = Buffer.alloc(7);
-  b[0] = 0; b[1] = 0; b[2] = count;
-  b.writeUInt32LE(version, 3);
-  return b;
-};
-const eventMsg = (index, record) => Buffer.concat([Buffer.from([1, 1, index]), record]);
-const commitSync = (count) => Buffer.from([2, 0, count]);
-const abortSync = () => Buffer.from([3, 0]);
 
 const decodeDigest = (p) => ({ proto: p[0], capacity: p[1], count: p[2], version: p.readUInt32LE(3) });
 
@@ -155,7 +131,8 @@ console.log(`connected to GATT bridge at ${HOST}:${PORT}`);
   });
   const golden = Buffer.from(
     '01000211' + '00' + 'ea07070d' + '2a01' +
-    '517572616e207072616374696365' + '00'.repeat(10) + '00ae556a', 'hex');
+    '517572616e207072616374696365' + '00'.repeat(10) + '00ae556a' +
+    '00000000', 'hex'); // end date: year 0 = never ends
   check(rec.equals(golden), 'encoder matches golden vector', rec.toString('hex'));
 }
 
@@ -180,7 +157,22 @@ const VERSION = 424242;
   r = await bridge.read(CHAR.scheduleDigest);
   const d = decodeDigest(r.payload);
   check(d.count === 3 && d.version === VERSION, 'digest reflects committed sync', JSON.stringify(d));
-  check(d.proto === 1 && d.capacity === 64, 'digest proto/capacity', JSON.stringify(d));
+  check(d.proto === 2 && d.capacity === 64, 'digest proto/capacity', JSON.stringify(d));
+
+  // A record announcing the wrong version must be refused, not misread. This is
+  // what makes an app/firmware version gap fail safely instead of writing
+  // garbage into the schedule, and it pins the two constants together across
+  // the repos: ScheduleService::eventRecordVersion and SCHEDULE_RECORD_VERSION.
+  {
+    const rec = encodeEventRecord({
+      id: 99, ruleKind: 1, hour: 7, minute: 0, anchor: new Date(), param: 1,
+      enabled: true, title: 'Wrong version',
+    });
+    const stale = Buffer.concat([Buffer.from([1, 1, 0]), rec]); // v1 record message
+    const r = await bridge.write(CHAR.scheduleSync, stale);
+    check(r.status !== 0, 'a v1 record message is rejected by v2 firmware', `status ${r.status}`);
+    await bridge.write(CHAR.scheduleSync, Buffer.from([0x03, 0x00])); // abort, leave clean
+  }
 }
 
 // 4. Protocol violations are rejected and leave state intact
