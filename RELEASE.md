@@ -9,6 +9,15 @@ Use one immutable SHA for each repository:
 | `PineTimeCompanion` | `master` |
 | `pinetime-dev-tools` | `main` |
 
+## InfiniTime 2.0.0 cutover
+
+Version 2.0.0 intentionally imports no earlier bond format, including the
+v1.26.0 multi-bond file. Every phone and computer pairs once after upgrading.
+Schedules, tasks, alarms, settings, and resources remain intact.
+
+Do not describe this as migration or backwards compatibility. The release notes
+must state the one-time re-pair before publication.
+
 Run `.github/workflows/cross-repository.yml` from `pinetime-dev-tools` with all
 four full SHAs. The workflow records the selected revisions, verifies every
 generated protocol target, runs firmware and simulator native tests, checks the

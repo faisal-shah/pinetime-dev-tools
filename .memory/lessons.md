@@ -8,6 +8,7 @@
 - Two concurrent BlueZ discoveries on one adapter conflict.
 - Long soaks must checkpoint before the final battery read.
 - Simulator authentication is injected policy state, not SMP.
+- Major bond-format cutovers should be documented as resets, not migrations.
 
 ## Patterns
 
