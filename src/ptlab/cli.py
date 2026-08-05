@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from ptlab.hardware import (
+    DEFAULT_MINIMUM_BATTERY_PERCENT,
     AcceptancePlan,
     AdbHardware,
     BleakHardware,
@@ -132,6 +133,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="run an operator-assisted multi-central hardware plan",
     )
     accept.add_argument("--plan", type=Path, required=True)
+    accept.add_argument(
+        "--battery-percent",
+        type=int,
+        required=True,
+        help="watch-reported estimate immediately before the run",
+    )
+    accept.add_argument(
+        "--battery-mv",
+        type=int,
+        required=True,
+        help="watch-reported battery voltage from Sys Info",
+    )
+    accept.add_argument(
+        "--minimum-battery-percent",
+        type=int,
+        default=DEFAULT_MINIMUM_BATTERY_PERCENT,
+    )
     accept.add_argument("--output", type=Path)
     return parser
 
@@ -178,6 +196,9 @@ def _hardware_main(args: argparse.Namespace, workspace) -> int:
             run_acceptance_plan(
                 workspace,
                 AcceptancePlan.load(args.plan),
+                reported_battery_percent=args.battery_percent,
+                reported_battery_mv=args.battery_mv,
+                minimum_battery_percent=args.minimum_battery_percent,
                 checkpoint=lambda value: save_hardware_result(
                     workspace,
                     "acceptance",

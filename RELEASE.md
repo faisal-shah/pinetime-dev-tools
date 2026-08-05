@@ -9,9 +9,9 @@ Use one immutable SHA for each repository:
 | `PineTimeCompanion` | `master` |
 | `pinetime-dev-tools` | `main` |
 
-## InfiniTime 2.0.0 cutover
+## InfiniTime 2.0.1 cutover
 
-Version 2.0.0 intentionally imports no earlier bond format, including the
+Version 2.0.1 intentionally imports no earlier bond format, including the
 v1.26.0 multi-bond file. Every phone and computer pairs once after upgrading.
 Schedules, tasks, alarms, settings, and resources remain intact.
 
@@ -58,15 +58,20 @@ uv run ptlab run --target sim --suite all --filter fast
 Use independent central identities. Turn notification forwarding off unless the
 step explicitly validates forwarding ownership.
 
-1. Run `ptlab hardware accept` with at least two phones and one Linux adapter in
+1. Start at **40% reported battery or higher**. The floor avoids a brownout
+   during flash/BLE work. For prerelease incident recovery, avoid charging all
+   the way to 100% when practical so a battery-drain reset does not take days.
+   Record the Sys Info millivolt value because PineTime estimates percentage
+   from voltage and has no hardware fuel gauge.
+2. Run `ptlab hardware accept` with at least two phones and one Linux adapter in
    an A-B-A sequence. Each peer must read the battery without routine re-pairing.
-2. Fill the watch with five peers, touch the intended survivor, pair a sixth,
+3. Fill the watch with five peers, touch the intended survivor, pair a sixth,
    and confirm the actual LRU peer is rejected without repairing while the
    survivor still verifies.
-3. Run `ptlab hardware probe` from a fresh Linux identity to prove the
+4. Run `ptlab hardware probe` from a fresh Linux identity to prove the
    authenticated verify gate and CCCD restore.
-4. Run `ptlab hardware advertise` over the required long-idle interval.
-5. Run `ptlab hardware soak` beside an upstream watch under the same placement,
+5. Run `ptlab hardware advertise` over the required long-idle interval.
+6. Run `ptlab hardware soak` beside an upstream watch under the same placement,
    charging history, display use, and scan schedule.
 
 The hardware JSON artifacts are release evidence. Advertising samples prove

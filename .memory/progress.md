@@ -7,8 +7,9 @@
 
 - Next task: P4-T1
 - Next action: copy `hardware-plan.example.json`, enter the exact ADB serials,
-  watch address, and BlueZ adapter, then run `uv sync --group hardware` and
-  `uv run ptlab hardware accept --plan <plan>`.
+  watch address, and BlueZ adapter, record Sys Info percent/millivolts, then run
+  `uv sync --group hardware` and `uv run ptlab hardware accept --plan <plan>
+  --battery-percent <n> --battery-mv <n>`.
 - Last checkpoint: 2026-08-04 23:44 UTC
 
 ## Phase 1 - Lab foundation
@@ -35,6 +36,7 @@
 
 ## Phase 4 - Physical ship gate
 
+- [x] P4-T0 enforce 40% reported floor and record millivolts (2026-08-05)
 - [ ] P4-T1 run A-B-A family handoff
 - [ ] P4-T2 run five-plus-six LRU acceptance
 - [ ] P4-T3 run fresh-auth and CCCD probe

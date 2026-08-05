@@ -8,12 +8,15 @@ import orjson
 import pytest
 
 from ptlab.hardware import (
+    AcceptancePeer,
     AcceptancePlan,
     AdbHardware,
     BleEndpoint,
     CharacteristicContract,
     HardwareError,
+    acceptance_battery_preflight,
     parse_adb_devices,
+    run_acceptance_plan,
     run_soak,
 )
 from ptlab.workspace import Workspace
@@ -196,3 +199,33 @@ def test_failed_soak_checkpoints_partial_evidence() -> None:
     assert checkpoints[-1]["candidate"]["advertising_samples"] == [
         {"timestamp": "one", "visible": True}
     ]
+
+
+def test_acceptance_rejects_battery_below_floor_before_hardware(
+    tmp_path: Path,
+) -> None:
+    plan = AcceptancePlan(
+        "Kid A",
+        (
+            AcceptancePeer("one", "android", serial="phone-a"),
+            AcceptancePeer("two", "android", serial="phone-b"),
+        ),
+        ("one", "two", "one"),
+    )
+    with pytest.raises(HardwareError, match="requires at least 40%"):
+        asyncio.run(
+            run_acceptance_plan(
+                Workspace(tmp_path),
+                plan,
+                reported_battery_percent=39,
+                reported_battery_mv=3740,
+            )
+        )
+
+
+def test_acceptance_battery_floor_records_voltage_and_caveat() -> None:
+    evidence = acceptance_battery_preflight(40, 3750)
+    assert evidence["passed"] is True
+    assert evidence["reported_percent"] == 40
+    assert evidence["reported_voltage_mv"] == 3750
+    assert "no hardware fuel gauge" in evidence["measurement_note"]

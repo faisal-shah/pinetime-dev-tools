@@ -19,6 +19,7 @@ from ptlab.workspace import Workspace
 
 CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
 ANDROID_PACKAGE = "dev.faisal.pinetimecompanion"
+DEFAULT_MINIMUM_BATTERY_PERCENT = 40
 
 
 class HardwareError(RuntimeError):
@@ -610,13 +611,52 @@ def _operator_result(prompt: str) -> str:
             return answer.lower()
 
 
+def acceptance_battery_preflight(
+    reported_percent: int,
+    reported_voltage_mv: int,
+    *,
+    minimum_percent: int = DEFAULT_MINIMUM_BATTERY_PERCENT,
+) -> dict[str, Any]:
+    if not 0 <= reported_percent <= 100:
+        raise ValueError("reported battery percent must be between 0 and 100")
+    if not 2500 <= reported_voltage_mv <= 5000:
+        raise ValueError("reported battery voltage must be between 2500 and 5000 mV")
+    if not 1 <= minimum_percent <= 100:
+        raise ValueError("minimum battery percent must be between 1 and 100")
+    if reported_percent < minimum_percent:
+        raise HardwareError(
+            f"watch reports {reported_percent}% battery; physical acceptance "
+            f"requires at least {minimum_percent}%"
+        )
+    return {
+        "reported_percent": reported_percent,
+        "reported_voltage_mv": reported_voltage_mv,
+        "minimum_percent": minimum_percent,
+        "passed": True,
+        "measurement_note": (
+            "PineTime estimates percentage from battery voltage and has no "
+            "hardware fuel gauge. Millivolts are recorded as supporting "
+            "evidence, not converted into a second state-of-charge claim."
+        ),
+    }
+
+
 async def run_acceptance_plan(
     workspace: Workspace,
     plan: AcceptancePlan,
     *,
+    reported_battery_percent: int,
+    reported_battery_mv: int,
+    minimum_battery_percent: int = DEFAULT_MINIMUM_BATTERY_PERCENT,
     operator: Callable[[str], str] = _operator_result,
     checkpoint: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
+    battery_preflight = acceptance_battery_preflight(
+        reported_battery_percent,
+        reported_battery_mv,
+        minimum_percent=minimum_battery_percent,
+    )
+
     started_at = datetime.now(UTC).isoformat()
     contract = CharacteristicContract.load(workspace)
     bleak = BleakHardware(contract)
@@ -630,6 +670,7 @@ async def run_acceptance_plan(
             "status": status,
             "started_at": started_at,
             "updated_at": datetime.now(UTC).isoformat(),
+            "battery_preflight": battery_preflight,
             "steps": steps,
             "capacity_check": capacity,
             "fidelity": {

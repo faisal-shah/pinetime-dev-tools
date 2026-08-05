@@ -31,8 +31,10 @@ regression scripts, CMake/CTest, and GitHub Actions.
 - Physical results checkpoint atomically after every step/sample.
 - Full-watch pairing requires explicit eviction permission.
 - Power and advertising outputs state their fidelity limits.
-- The InfiniTime 2.0.0 release imports no previous bond format; the release
+- The InfiniTime 2.0.1 release imports no previous bond format; the release
   gate must state the required one-time re-pair.
+- Physical acceptance uses a 40% reported floor and records millivolts because
+  PineTime estimates charge from voltage without a hardware fuel gauge.
 
 ## Key Decisions
 

@@ -102,8 +102,16 @@ filtered Bluetooth evidence, and require an explicit operator result after the
 battery read. The runner never calls a hidden Android bond-removal API.
 
 ```sh
-uv run ptlab hardware accept --plan /path/to/family-watch.json
+uv run ptlab hardware accept \
+  --plan /path/to/family-watch.json \
+  --battery-percent 40 \
+  --battery-mv 3750
 ```
+
+Acceptance requires at least 40% by the watch's reported estimate. PineTime has
+no hardware fuel gauge, so the percentage is not treated as precise state of
+charge; record the millivolt reading from Sys Info alongside it. The result
+artifact preserves both values and the measurement limitation.
 
 For the five-peer/sixth-peer LRU test, add six independent peers and this object
 to the plan. The operator must test the evicted peer without repairing it:

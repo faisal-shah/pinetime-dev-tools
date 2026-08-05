@@ -9,6 +9,8 @@
 - Long soaks must checkpoint before the final battery read.
 - Simulator authentication is injected policy state, not SMP.
 - Major bond-format cutovers should be documented as resets, not migrations.
+- PineTime battery percentage is a voltage-derived estimate; preserve the raw
+  millivolt reading in physical evidence.
 
 ## Patterns
 
