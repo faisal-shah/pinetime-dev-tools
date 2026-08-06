@@ -9,9 +9,9 @@ Use one immutable SHA for each repository:
 | `PineTimeCompanion` | `master` |
 | `pinetime-dev-tools` | `main` |
 
-## InfiniTime 2.0.1 cutover
+## InfiniTime 2.0.2 cutover
 
-Version 2.0.1 intentionally imports no earlier bond format, including the
+Version 2.0.2 intentionally imports no earlier bond format, including the
 v1.26.0 multi-bond file. Every phone and computer pairs once after upgrading.
 Schedules, tasks, alarms, settings, and resources remain intact.
 

@@ -10,7 +10,7 @@
   watch address, and BlueZ adapter, record Sys Info percent/millivolts, then run
   `uv sync --group hardware` and `uv run ptlab hardware accept --plan <plan>
   --battery-percent <n> --battery-mv <n>`.
-- Last checkpoint: 2026-08-04 23:44 UTC
+- Last checkpoint: 2026-08-06 02:18 UTC
 
 ## Phase 1 - Lab foundation
 
@@ -32,7 +32,8 @@
 - [x] P3-T2 add Bleak and ADB adapters (2026-08-04)
 - [x] P3-T3 add acceptance, long-idle, and soak workflows (2026-08-04)
 - [x] P3-T4 document release and fidelity gates (2026-08-04)
-- [x] GATE-P3 - 44 tests pass; implementation commit `bfeeb47` created
+- [x] GATE-P3 - 46 tests, package build, protocol check, and all eight
+  deterministic suites pass (2026-08-05)
 
 ## Phase 4 - Physical ship gate
 
