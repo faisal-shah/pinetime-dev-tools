@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from ptlab.gatt import BUSY_STATUS, GattProtocolError, resolve_characteristic
+from ptlab.generated.companion_protocol import RECORDS
 from ptlab.scenario import ScenarioContext, ScenarioDefinition
 from ptlab.wire import (
     SCHEDULE_RECORD_VERSION,
@@ -14,10 +15,12 @@ from ptlab.wire import (
     commit_sync,
     encode_schedule_record,
     encode_task_record,
+    family_mutation_token,
     parse_companion_status,
     parse_digest,
     pull_records,
     push_records,
+    wait_family_commit,
     record_message,
 )
 
@@ -69,6 +72,11 @@ def _wait_digest(
 
 
 def _host_test(context: ScenarioContext, executable: Path, name: str) -> None:
+    override = os.environ.get("PTLAB_HOST_TEST_BUILD")
+    if override:
+        candidate = Path(override) / executable.name
+        if candidate.exists():
+            executable = candidate
     result = context.run_command([str(executable)], cwd=context.paths.run, timeout=30)
     summary = (result.stdout + result.stderr).strip().splitlines()
     context.check(
@@ -207,6 +215,11 @@ def radio_policy(context: ScenarioContext) -> None:
     with context.gatt() as gatt:
         key = gatt.write("beacon_key", bytes(range(28)))
         context.require(key.status == 0, "beacon key provisioning accepted", actual=key.status, expected=0)
+        wait_family_commit(
+            gatt,
+            operation=RECORDS["family_state"]["operations"]["beacon_key"],
+            token=family_mutation_token(bytes(range(28))),
+        )
         enable = gatt.write("beacon_control", b"\x01")
         context.require(enable.status == 0, "beacon transition request accepted", actual=enable.status, expected=0)
         time.sleep(0.2)
@@ -278,6 +291,18 @@ def link_auth(context: ScenarioContext) -> None:
                 record_version=SCHEDULE_RECORD_VERSION,
             ),
         )
+        context.require(
+            schedule_begin.status == 0 and schedule_record.status == 0,
+            "schedule staging begins",
+        )
+
+    control.command(_peer(41))
+    with context.gatt() as reconnected:
+        schedule_commit = reconnected.write("schedule_sync", commit_sync(2))
+        context.check(schedule_commit.status != 0, "disconnect cleanup aborts schedule staging")
+
+    control.command(_peer(40))
+    with context.gatt() as authenticated:
         task_begin = authenticated.write("tasks_sync", begin_sync(2, 200))
         task_record = authenticated.write(
             "tasks_sync",
@@ -287,13 +312,14 @@ def link_auth(context: ScenarioContext) -> None:
                 record_version=TASK_RECORD_VERSION,
             ),
         )
-        context.require(all(response.status == 0 for response in (schedule_begin, schedule_record, task_begin, task_record)), "schedule and task staging begins")
+        context.require(
+            task_begin.status == 0 and task_record.status == 0,
+            "task staging begins",
+        )
 
     control.command(_peer(41))
     with context.gatt() as reconnected:
-        schedule_commit = reconnected.write("schedule_sync", commit_sync(2))
         task_commit = reconnected.write("tasks_sync", commit_sync(2))
-        context.check(schedule_commit.status != 0, "disconnect cleanup aborts schedule staging")
         context.check(task_commit.status != 0, "disconnect cleanup aborts task staging")
 
     control.command(_peer(42))
@@ -555,9 +581,10 @@ def raw_flash_power_loss(context: ScenarioContext) -> None:
         record_version=SCHEDULE_RECORD_VERSION,
     )
     _wait_digest(context, gatt, "schedule_digest", count=3, version=31337)
-    begin = gatt.write("schedule_sync", begin_sync(64, 777777))
+    capacity = RECORDS["schedule"]["capacity"]
+    begin = gatt.write("schedule_sync", begin_sync(capacity, 777777))
     context.require(begin.status == 0, "raw power-loss staging begins")
-    for index in range(32):
+    for index in range(capacity // 2):
         response = gatt.write(
             "schedule_sync",
             record_message(
@@ -575,8 +602,8 @@ def raw_flash_power_loss(context: ScenarioContext) -> None:
 
     littlefs = context.workspace.infinisim / "build" / "littlefs-do"
     listing = context.run_command([str(littlefs), "ls", "/.system"], cwd=context.paths.flash)
-    context.check("schedule.dat" in listing.stdout, "raw flash retains schedule.dat after power cut")
-    context.check("schedule.stg" in listing.stdout, "raw flash contains only the interrupted staging file")
+    context.check("family-state.dat" in listing.stdout, "raw flash retains the durable family snapshot after power cut")
+    context.check("family-state.tmp" not in listing.stdout, "RAM-only list staging creates no partial flash file")
 
     state = context.simulator.start(
         bridge_port=context.gatt_port,
@@ -591,8 +618,6 @@ def raw_flash_power_loss(context: ScenarioContext) -> None:
         parsed = parse_digest(digest.payload)
         context.check(parsed.count == 3 and parsed.version == 31337, "reboot restores pre-cut live schedule")
     context.simulator.stop()
-    listing = context.run_command([str(littlefs), "ls", "/.system"], cwd=context.paths.flash)
-    context.check("schedule.stg" not in listing.stdout, "boot removes interrupted schedule staging file")
     context.sim_state = context.simulator.start(
         bridge_port=context.gatt_port,
         ble_control_port=context.control_port,
@@ -648,7 +673,7 @@ SCENARIOS = (
     ),
     ScenarioDefinition(
         "raw-flash-power-loss",
-        "Raw littlefs schedule staging power-loss and boot cleanup regression.",
+        "RAM-only schedule staging power-loss and family snapshot recovery.",
         raw_flash_power_loss,
         tags=frozenset({"regression", "power-loss"}),
         timeout=120,

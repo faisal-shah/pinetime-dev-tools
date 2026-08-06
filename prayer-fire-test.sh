@@ -40,8 +40,8 @@ PYEOF
 }
 
 # NYC, ISNA, Standard, UTC-4: lat 40.71 -> 4071, lon -74.01 -> -7401, tz -16 quarters.
-BLOB_ALERTS_ON="01010001e70f17e3f0"
-BLOB_ALERTS_OFF="01010000e70f17e3f0"
+BLOB_ALERTS_ON="02010001e70f17e3f0"
+BLOB_ALERTS_OFF="02010000e70f17e3f0"
 
 # node helper: write a prayer blob and confirm via read-back; then CTS-warp.
 configure() { # configure <blobhex> <hour> <min> <sec>

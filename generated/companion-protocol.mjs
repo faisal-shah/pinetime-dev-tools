@@ -1,5 +1,5 @@
 // Generated from protocol/companion.json.
-// Manifest SHA-256: 6a3dc57bba4cb3ef146be88209256026e5a531f0fbad6079e34a14692dcd0949
+// Manifest SHA-256: f4881c3833b552227463a5af2f4a07f110ec1c67f7ff44d1f193af15b9d6750c
 // Do not edit by hand.
 export const COMPANION_CAPABILITIES = Object.freeze({
   activeConnections: 1,
@@ -46,6 +46,7 @@ export const BRIDGE_CHAR = Object.freeze({
   taskRead: 32,
   companionStatus: 33,
   companionVerify: 34,
+  familyStateStatus: 35,
 });
 
 export const RECORDS = Object.freeze({
@@ -54,26 +55,74 @@ export const RECORDS = Object.freeze({
     "protocol_version": 1,
     "status_size": 20
   },
+  "family_state": {
+    "att_errors": {
+      "busy": 128,
+      "protocol": 129,
+      "storage": 130
+    },
+    "errors": {
+      "busy": 1,
+      "crc": 9,
+      "invalid_state": 10,
+      "none": 0,
+      "queue_full": 2,
+      "read": 5,
+      "rename": 8,
+      "spi": 4,
+      "sync": 7,
+      "timeout": 3,
+      "unsupported": 11,
+      "write": 6
+    },
+    "flags": {
+      "storage_warning": 1
+    },
+    "operations": {
+      "beacon_key": 6,
+      "bond_store": 8,
+      "boot_initialization": 11,
+      "fs_transfer": 9,
+      "multi_alarm": 4,
+      "none": 0,
+      "prayer_settings": 5,
+      "resource_read": 10,
+      "schedule": 1,
+      "settings": 7,
+      "task_streak": 3,
+      "tasks": 2
+    },
+    "protocol_version": 1,
+    "snapshot_schema_version": 1,
+    "states": {
+      "failed": 3,
+      "idle": 0,
+      "pending": 1,
+      "succeeded": 2
+    },
+    "status_size": 16
+  },
   "multi_alarm": {
     "capacity": 5,
+    "protocol_version": 2,
     "record_size": 24
   },
   "prayer_settings": {
-    "protocol_version": 1,
+    "protocol_version": 2,
     "record_size": 9
   },
   "schedule": {
-    "capacity": 64,
+    "capacity": 32,
     "digest_size": 7,
-    "protocol_version": 1,
+    "protocol_version": 3,
     "record_size": 43,
-    "record_version": 2
+    "record_version": 3
   },
   "task": {
     "capacity": 20,
     "digest_size": 9,
-    "protocol_version": 1,
+    "protocol_version": 2,
     "record_size": 31,
-    "record_version": 1
+    "record_version": 2
   }
 });

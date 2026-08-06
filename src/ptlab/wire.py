@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import struct
+import time
+import zlib
 from dataclasses import dataclass
 from datetime import date
 
 from ptlab.gatt import GattClient
+from ptlab.generated.companion_protocol import RECORDS
 
 
-SCHEDULE_RECORD_VERSION = 2
-SCHEDULE_RECORD_SIZE = 43
-TASK_RECORD_VERSION = 1
-TASK_RECORD_SIZE = 31
+SCHEDULE_RECORD_VERSION = RECORDS["schedule"]["record_version"]
+SCHEDULE_RECORD_SIZE = RECORDS["schedule"]["record_size"]
+TASK_RECORD_VERSION = RECORDS["task"]["record_version"]
+TASK_RECORD_SIZE = RECORDS["task"]["record_size"]
 
 
 @dataclass(frozen=True)
@@ -111,6 +114,34 @@ def abort_sync() -> bytes:
     return b"\x03\x00"
 
 
+def family_mutation_token(payload: bytes) -> int:
+    token = zlib.crc32(payload) & 0xFFFFFFFF
+    return token or 1
+
+
+def wait_family_commit(
+    client: GattClient,
+    *,
+    operation: int,
+    token: int,
+    timeout: float = 5,
+) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status = client.read("family_state_status")
+        if status.status == 0 and len(status.payload) == RECORDS["family_state"]["status_size"]:
+            state = status.payload[2]
+            active_operation = status.payload[3]
+            active_token = struct.unpack_from("<I", status.payload, 6)[0]
+            if active_operation == operation and active_token == token:
+                if state == RECORDS["family_state"]["states"]["succeeded"]:
+                    return
+                if state == RECORDS["family_state"]["states"]["failed"]:
+                    raise RuntimeError("family-state durable commit failed")
+        time.sleep(0.025)
+    raise RuntimeError("family-state durable commit timed out")
+
+
 def parse_digest(payload: bytes) -> Digest:
     if len(payload) not in (7, 9):
         raise ValueError(f"digest must be 7 or 9 bytes, got {len(payload)}")
@@ -149,6 +180,11 @@ def push_records(
     response = client.write(sync_characteristic, commit_sync(len(records)))
     if response.status != 0:
         raise RuntimeError(f"{sync_characteristic} commit failed with ATT status 0x{response.status:02x}")
+    operation = {
+        "schedule_sync": RECORDS["family_state"]["operations"]["schedule"],
+        "tasks_sync": RECORDS["family_state"]["operations"]["tasks"],
+    }[sync_characteristic]
+    wait_family_commit(client, operation=operation, token=version)
 
 
 def pull_records(

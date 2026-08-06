@@ -10,12 +10,45 @@
 // code paths a real BLE central would hit.
 
 import net from 'node:net';
-import { BRIDGE_CHAR as CHAR } from './generated/companion-protocol.mjs';
+import { BRIDGE_CHAR as CHAR, RECORDS } from './generated/companion-protocol.mjs';
 
 const PORT = Number(process.env.BRIDGE_PORT ?? 18632);
 const HOST = process.env.BRIDGE_HOST ?? '127.0.0.1';
 
 const OP = { write: 0, read: 1 };
+
+function mutationToken(payload) {
+  let crc = 0xffffffff;
+  for (const byte of payload) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  const token = (~crc) >>> 0;
+  return token === 0 ? 1 : token;
+}
+
+async function waitForFamilyCommit(bridge, operation, token) {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const response = await bridge.read(CHAR.familyStateStatus);
+    if (response.status === 0 && response.payload.length === 16) {
+      const state = response.payload[2];
+      const activeOperation = response.payload[3];
+      const activeToken = response.payload.readUInt32LE(6);
+      if (activeOperation === operation && activeToken === token) {
+        if (state === RECORDS.family_state.states.succeeded) {
+          return true;
+        }
+        if (state === RECORDS.family_state.states.failed) {
+          return false;
+        }
+      }
+    }
+    await sleep(25);
+  }
+  return false;
+}
 
 let failures = 0;
 let checks = 0;
@@ -156,7 +189,7 @@ const VERSION = 424242;
   r = await bridge.read(CHAR.scheduleDigest);
   const d = decodeDigest(r.payload);
   check(d.count === 3 && d.version === VERSION, 'digest reflects committed sync', JSON.stringify(d));
-  check(d.proto === 2 && d.capacity === 64, 'digest proto/capacity', JSON.stringify(d));
+  check(d.proto === 3 && d.capacity === 32, 'digest proto/capacity', JSON.stringify(d));
 
   // A record announcing the wrong version must be refused, not misread. This is
   // what makes an app/firmware version gap fail safely instead of writing
@@ -181,7 +214,7 @@ const VERSION = 424242;
   })));
   check(r.status !== 0, 'EventRecord without BeginSync rejected');
 
-  r = await bridge.write(CHAR.scheduleSync, beginSync(65, 1)); // over capacity
+  r = await bridge.write(CHAR.scheduleSync, beginSync(33, 1)); // over capacity
   check(r.status !== 0, 'BeginSync over capacity rejected');
 
   r = await bridge.write(CHAR.scheduleSync, beginSync(2, 777));
@@ -254,7 +287,7 @@ const VERSION = 424242;
   check(afterB.filter((p) => p.readUInt16LE(0) !== 0x7777).length === 3, "A's original events survived B's sync");
 }
 
-// 8. Full-capacity sync, staged OUT OF ORDER: 64 records written index 63..0
+// 8. Full-capacity sync, staged OUT OF ORDER: 32 records written index 31..0
 //    (littlefs zero-fills the seek-past-EOF gaps; the receive bitmask ensures
 //    completeness before commit). Spot-read records across the file after.
 const mkSlotEvent = (i) => ({
@@ -263,25 +296,25 @@ const mkSlotEvent = (i) => ({
   lastModified: 1789000000 + i,
 });
 {
-  const FULL_VERSION = 646464;
-  let r = await bridge.write(CHAR.scheduleSync, beginSync(64, FULL_VERSION));
-  check(r.status === 0, 'BeginSync(64) accepted');
+  const FULL_VERSION = 323232;
+  let r = await bridge.write(CHAR.scheduleSync, beginSync(32, FULL_VERSION));
+  check(r.status === 0, 'BeginSync(32) accepted');
   let allOk = true;
-  for (let i = 63; i >= 0; i--) {
+  for (let i = 31; i >= 0; i--) {
     r = await bridge.write(CHAR.scheduleSync, eventMsg(i, encodeEventRecord(mkSlotEvent(i))));
     if (r.status !== 0) {
       allOk = false;
       break;
     }
   }
-  check(allOk, 'all 64 records staged in reverse order');
-  r = await bridge.write(CHAR.scheduleSync, commitSync(64));
-  check(r.status === 0, 'CommitSync(64) accepted');
+  check(allOk, 'all 32 records staged in reverse order');
+  r = await bridge.write(CHAR.scheduleSync, commitSync(32));
+  check(r.status === 0, 'CommitSync(32) accepted');
   await sleep(300);
   r = await bridge.read(CHAR.scheduleDigest);
   const d = decodeDigest(r.payload);
-  check(d.count === 64 && d.version === FULL_VERSION, 'digest shows 64 events', JSON.stringify(d));
-  for (const idx of [0, 40, 63]) {
+  check(d.count === 32 && d.version === FULL_VERSION, 'digest shows 32 events', JSON.stringify(d));
+  for (const idx of [0, 20, 31]) {
     await bridge.write(CHAR.eventRead, Buffer.from([idx]));
     r = await bridge.read(CHAR.eventRead);
     const want = encodeEventRecord(mkSlotEvent(idx));
@@ -292,8 +325,8 @@ const mkSlotEvent = (i) => ({
 // 9. Stale read index: a select survives only while the schedule stays at
 //    least that big; the firmware re-validates at read time.
 {
-  let r = await bridge.write(CHAR.eventRead, Buffer.from([63]));
-  check(r.status === 0, 'select record 63 while 64 events live');
+  let r = await bridge.write(CHAR.eventRead, Buffer.from([31]));
+  check(r.status === 0, 'select record 31 while 32 events live');
   const SHRUNK_VERSION = 655001;
   await bridge.write(CHAR.scheduleSync, beginSync(2, SHRUNK_VERSION));
   for (let i = 0; i < 2; i++) {
@@ -357,11 +390,19 @@ const mkSlotEvent = (i) => ({
 //     the asynchronous commit via read-back; invalid blobs are rejected and
 //     leave the stored settings untouched.
 {
-  const golden = Buffer.from('010101015c10c5ddec', 'hex'); // Chicago, ISNA, Hanafi, alerts on, UTC-5
+  const golden = Buffer.from('020101015c10c5ddec', 'hex'); // Chicago, ISNA, Hanafi, alerts on, UTC-5
   await sleep(100);
   const bridge3 = await Bridge.connect();
   let r = await bridge3.write(CHAR.prayerSettings, golden);
   check(r.status === 0, 'prayer settings write accepted');
+  check(
+    await waitForFamilyCommit(
+      bridge3,
+      RECORDS.family_state.operations.prayer_settings,
+      mutationToken(golden),
+    ),
+    'prayer settings became durable',
+  );
   let echoed = null;
   for (let attempt = 0; attempt < 5; attempt++) {
     await sleep(200);
@@ -376,7 +417,7 @@ const mkSlotEvent = (i) => ({
   r = await bridge3.write(CHAR.prayerSettings, golden.subarray(0, 8));
   check(r.status !== 0, 'short prayer blob rejected');
   const badVersion = Buffer.from(golden);
-  badVersion[0] = 2;
+  badVersion[0] = 1;
   r = await bridge3.write(CHAR.prayerSettings, badVersion);
   check(r.status !== 0, 'wrong prayer version rejected');
   const badLat = Buffer.from(golden);
@@ -397,10 +438,26 @@ const mkSlotEvent = (i) => ({
   allButFajr[3] = 0x03;
   r = await bridge3.write(CHAR.prayerSettings, allButFajr);
   check(r.status === 0, 'all-but-Fajr flags accepted');
+  check(
+    await waitForFamilyCommit(
+      bridge3,
+      RECORDS.family_state.operations.prayer_settings,
+      mutationToken(allButFajr),
+    ),
+    'all-but-Fajr settings became durable',
+  );
   // ...and put the golden settings back so the untouched-check below is about
   // the rejected writes, not this one.
   r = await bridge3.write(CHAR.prayerSettings, golden);
   check(r.status === 0, 'golden prayer settings restored');
+  check(
+    await waitForFamilyCommit(
+      bridge3,
+      RECORDS.family_state.operations.prayer_settings,
+      mutationToken(golden),
+    ),
+    'restored prayer settings became durable',
+  );
 
   await sleep(300);
   r = await bridge3.read(CHAR.prayerSettings);

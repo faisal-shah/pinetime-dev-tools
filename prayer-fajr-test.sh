@@ -31,8 +31,8 @@ PYEOF
 }
 
 # NYC, ISNA, Standard, UTC-4. Only the flags byte differs between the two.
-BLOB_EXCEPT_FAJR="01010003e70f17e3f0"
-BLOB_ALL="01010001e70f17e3f0"
+BLOB_EXCEPT_FAJR="02010003e70f17e3f0"
+BLOB_ALL="02010001e70f17e3f0"
 
 configure() { # configure <blobhex> <hour> <min> <sec>
   node - "$1" "$2" "$3" "$4" <<'EOF'
