@@ -1,5 +1,5 @@
 // Generated from protocol/companion.json.
-// Manifest SHA-256: f4881c3833b552227463a5af2f4a07f110ec1c67f7ff44d1f193af15b9d6750c
+// Manifest SHA-256: 1cdc7fce2dc132ec67cdd7d34c4fd724290d4ab637c10b742b37f13f5a6eacc2
 // Do not edit by hand.
 export const COMPANION_CAPABILITIES = Object.freeze({
   activeConnections: 1,
@@ -112,14 +112,14 @@ export const RECORDS = Object.freeze({
     "record_size": 9
   },
   "schedule": {
-    "capacity": 32,
+    "capacity": 16,
     "digest_size": 7,
     "protocol_version": 3,
     "record_size": 43,
     "record_version": 3
   },
   "task": {
-    "capacity": 20,
+    "capacity": 12,
     "digest_size": 9,
     "protocol_version": 2,
     "record_size": 31,
